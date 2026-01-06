@@ -7,7 +7,7 @@
 A cross platform tool for manual sleep scoring written in Rust. It is capable of loading and visualizing signals from EDF files. The focus is on an intuitive usage primarily with the keyboard to speed up your workflow. **This tool is in an early development stage and not yet considered stable**
 
 [<img src=".github/screenshots/screenshot_project_creation.png" width=350>](.github/screenshots/screenshot_project_creation.png)&nbsp;
-[<img src=".github/screenshots/screenshot_viewer.png" width=370>](.github/screenshots/screenshot_viewer.png)
+[<img src=".github/screenshots/screenshot_viewer.png" width=420>](.github/screenshots/screenshot_viewer.png)
 
 ## Current features
 The current state of this application allows you to do the following:
@@ -63,5 +63,6 @@ This project is licensed under either of
 
 * Apache License, Version 2.0 [[LICENSE-APACHE](LICENSE-APACHE)]
 * MIT License [[LICENSE-MIT](LICENSE-MIT)]
+
 
 at your option.
