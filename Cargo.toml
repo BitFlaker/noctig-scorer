@@ -1,0 +1,37 @@
+[package]
+name = "NoctiGScorer"
+version = "0.1.0"
+
+authors = ["BitFlaker"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/BitFlaker/noctig-scorer"
+readme = "README.md"
+
+description = "Cross platform tool for manual sleep scoring written in Rust. Also usable as a visualizer and organizer for EDF+ files"
+
+edition = "2024"
+
+[dependencies]
+# UI crates
+iced = { version = "0.14.0", features = ["wayland", "canvas", "image", "svg"] }
+iced_font_awesome = "0.4.1"
+
+# Logging
+log = "0.4.28"
+env_logger = "0.11.8"
+
+# EDF+ file parser
+edfplus = "0.1.0"
+
+# File picker dialog
+rfd = "0.16.0"
+
+# XML and JSON Serialization support for project files
+xml = "1.2.0"
+serde-xml-rs = "0.8.2"
+serde_json = "1.0.148"
+serde = "1.0.228"
+
+# Miscellaneous crates
+chrono = "0.4.42"
+itertools = "0.14.0"    # Only required for `intersperse_with`
