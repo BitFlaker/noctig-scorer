@@ -1,4 +1,12 @@
-# <img alt="NoctiGScorer-Icon" align="left" src="resources/icon.png" height="40px" /> NoctiG Scorer
+<h1>
+  <picture>
+    <source srcset="resources/icon.png" media="(prefers-color-scheme: dark)">
+    <source srcset="resources/icon_dark.png" media="(prefers-color-scheme: light)">
+    <img alt="NoctiGScorer-Icon" align="left" src="resources/icon.png" height="48px" />
+  </picture>
+  NoctiG Scorer
+</h1>
+
 ![GitHub License](https://img.shields.io/github/license/BitFlaker/noctig-scorer)
 ![GitHub repo size](https://img.shields.io/github/repo-size/BitFlaker/noctig-scorer)
 ![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/BitFlaker/noctig-scorer)
@@ -66,3 +74,4 @@ This project is licensed under either of
 
 
 at your option.
+
