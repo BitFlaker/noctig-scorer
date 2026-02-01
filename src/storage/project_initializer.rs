@@ -1,9 +1,7 @@
-use std::fs::{self, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use std::error::Error;
 use std::collections::BTreeMap;
-use std::fs::{create_dir_all, read_dir};
+use std::fs::{self, create_dir_all, read_dir};
 
 use iced::Task;
 use xml::EmitterConfig;
@@ -12,12 +10,6 @@ use serde_xml_rs::SerdeXml;
 use crate::{Annotations, Markers, Message, Project, ProjectConfiguration, ProjectType, Scorings, SessionState};
 
 const ILLEGAL_PATH_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
-
-// The `edfplus` crate requires EDF files to have a value starting with `EDF+C` in the header of 
-// the EDF file at position 192 to 236. Therefore some valid EDF files might be considered invalid.
-// With this flag set to `true`, the header will be overwritten at this position to ensure the value 
-// to start with `EDF+C`. This is a workaround which is hopefully not required in the future.
-const ENSURE_EDFPLUS_TAG_INSERTED: bool = true;
 
 pub fn create_new(project: ProjectConfiguration) -> Task<Message> {
     Task::future(create_new_handler(project))
@@ -52,7 +44,7 @@ async fn create_new_async(config: ProjectConfiguration) -> Result<String, Box<dy
     else {
         create_dir_all(project_path)?;
     }
-    
+
     // Create and store the project file
     let xml_serializer = SerdeXml::new().emitter(EmitterConfig::new().perform_indent(true));
     let project = Project::from_config(&config);
@@ -68,15 +60,6 @@ async fn create_new_async(config: ProjectConfiguration) -> Result<String, Box<dy
     for source in config.data.iter().filter(|s| !s.is_reference) {
         let target = subdir_sources.join(&source.name);
         fs::copy(&source.path, &target)?;
-
-        // Workaround to be able to try read any EDF file
-        if ENSURE_EDFPLUS_TAG_INSERTED {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .open(target)?;
-            file.seek(SeekFrom::Start(192))?;
-            file.write_all(b"EDF+C")?;
-        }
     }
 
     // TODO: Perform MNE filter on all EDF files in the 'source' directory and write filtered data in place
@@ -91,7 +74,7 @@ async fn create_new_async(config: ProjectConfiguration) -> Result<String, Box<dy
 
     // Create the default scores collection file if required for project type
     if project.project_type == ProjectType::SleepScoring {
-        let scores_json = serde_json::to_string_pretty(&Scorings { 
+        let scores_json = serde_json::to_string_pretty(&Scorings {
             epoch_duration: project.epoch_duration,
             values: BTreeMap::new()
         })?;
@@ -114,11 +97,11 @@ pub fn sanitize_file_name(value: &str) -> String {
 
 pub fn illegal_path_char_positions(value: &str) -> Vec<usize> {
     value.char_indices()
-        .filter_map(|(i, c)| 
-            if ILLEGAL_PATH_CHARS.contains(&c) || c <= '\u{1F}' { 
-                Some(i) 
-            } else { 
-                None 
+        .filter_map(|(i, c)|
+            if ILLEGAL_PATH_CHARS.contains(&c) || c <= '\u{1F}' {
+                Some(i)
+            } else {
+                None
             })
         .collect()
 }

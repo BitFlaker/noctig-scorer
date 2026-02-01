@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]  // hide console window on Windows in release
 
-use edfplus::EdfReader;
+use edf_rs::file::EDFFile;
 use iced::{Element, Point, Size, Task, Theme, window};
 use iced::keyboard::{key::Named, Key};
 use iced::event::Status;
@@ -18,7 +18,7 @@ use log::LevelFilter;
 
 use crate::layout::create_project::create_viewer;
 use crate::layout::{scorer, start};
-use crate::storage::multi_reader::MultiEdfReader;
+use crate::storage::epoch_reader::EpochReader;
 use crate::formatting::theme::{border_background_base, text_foreground_base};
 use crate::storage::project_initializer;
 
@@ -40,7 +40,7 @@ fn main() -> iced::Result {
         .format(|buf, record| writeln!(buf, "[{}] {}", record.level(), record.args()))
         .filter(Some(env!("CARGO_PKG_NAME")), LevelFilter::Info)
         .init();
-    
+
     // Launch UI
     iced::application(NoctiG::boot, NoctiG::update, NoctiG::view)
         .window_size(Size::new(1400.0, 800.0))
@@ -147,10 +147,10 @@ impl SignalSource {
         };
 
         Self {
-            path, 
-            read_only: config.is_reference, 
-            offset: 0, 
-            merge_groups: Vec::new() 
+            path,
+            read_only: config.is_reference,
+            offset: 0,
+            merge_groups: Vec::new()
         }
     }
 }
@@ -180,7 +180,7 @@ pub struct ProjectConfiguration {
 
 pub struct ProjectSignals {
     pub timestamp: u64,
-    pub duration: i64,
+    pub duration: f64,
     pub signal_count: usize,
     pub path: String,
     pub name: String,
@@ -189,7 +189,7 @@ pub struct ProjectSignals {
 
 pub struct CurrentProject {
     path: String,
-    readers: Vec<MultiEdfReader>,
+    readers: Vec<EpochReader>,
     project: Project,
     markers: Markers,
     annotations: Annotations,
@@ -214,20 +214,20 @@ impl CurrentProject {
 
         let readers = project.signals.iter().map(|source| {
             let path = Path::new(&path).join(&source.path);
-            let mut reader = MultiEdfReader::from_paths(&[&path]);
+            let mut reader = EpochReader::new(&path);
             if let Ok(reader) = &mut reader {
-                reader.set_start_align_offset(reader.get_epoch_sample_count() * project.epochs_before_current as u64);
+                reader.set_start_align_offset(project.epochs_before_current as u64 * EpochReader::EPOCH_DURATION as u64 * 1000);
                 reader.set_offset(source.offset);
             }
             reader
         }).collect::<Result<Vec<_>, _>>()?;
 
-        let mut result = Self { 
-            path, 
-            readers, 
-            project, 
-            markers: Markers::default(), 
-            annotations: Annotations::default(), 
+        let mut result = Self {
+            path,
+            readers,
+            project,
+            markers: Markers::default(),
+            annotations: Annotations::default(),
             scorings: None
         };
 
@@ -242,7 +242,7 @@ impl CurrentProject {
         let scores_file = subdir_lables.join("scores.json");
         let markers_file = subdir_lables.join("markers.json");
         let annotations_file = subdir_lables.join("annotations.json");
-        
+
         // Load stored markers collection file or get default
         self.markers = if markers_file.exists() {
             let markers_json = fs::read_to_string(markers_file)?;
@@ -294,7 +294,7 @@ impl CurrentProject {
 
 impl NoctiG {
     fn boot() -> (NoctiG, Task<Message>) {
-        (NoctiG { 
+        (NoctiG {
             current_page: Page::Home,
             window_time_formatter_index: 1,
             draw_ranges: false,
@@ -320,7 +320,7 @@ impl NoctiG {
                     return Task::none();
                 };
                 if let Some(reader) = project.readers.first() {
-                    let current_seg_n = reader.get_current_epoch();
+                    let current_seg_n = reader.get_window_start_epoch();
                     if stage == Stage::Unset {
                         scorings.values.remove_entry(&current_seg_n);
                     }
@@ -337,12 +337,11 @@ impl NoctiG {
                 let Some(project) = &mut self.current_project else {
                     return Task::none();
                 };
-                
+
                 for reader in &mut project.readers {
-                    let segment_sample_count = reader.get_epoch_sample_count();
                     let segment_count = project.project.epochs_before_current as usize + project.project.epochs_after_current as usize + 1;
-                    let _ = reader.seek(segment_sample_count as i64 * epoch as i64);
-                    reader.read_physical_samples(segment_sample_count as usize * segment_count).unwrap();
+                    let _ = reader.seek(EpochReader::EPOCH_DURATION as u64 * 1_000 * epoch as u64);
+                    reader.read_epochs(segment_count).unwrap();
                 }
             },
             Message::CycleTimeFormatter => {
@@ -358,10 +357,10 @@ impl NoctiG {
                 self.current_page = page
             },
             Message::CreateProjectWizard => {
-                self.project_creation = Some(ProjectConfiguration { 
-                    name: "".to_string(), 
-                    path: "".to_string(), 
-                    new_tag: "".to_string(), 
+                self.project_creation = Some(ProjectConfiguration {
+                    name: "".to_string(),
+                    path: "".to_string(),
+                    new_tag: "".to_string(),
                     tags: Vec::new(),
                     filter_signal: true,
                     auto_align_signals: true,
@@ -374,7 +373,7 @@ impl NoctiG {
                 let Some(project) = &mut self.current_project else {
                     return Task::none();
                 };
-                
+
                 if let Err(e) = project.save() {
                     eprintln!("Error saving project: {}", e);
                     return Task::none()
@@ -496,26 +495,23 @@ impl NoctiG {
             Message::BrowseImportSignal => {
                 // TODO: Prevent unresponsive warning while picking location
                 if let Some(files) = FileDialog::new()
-                    .add_filter("EDF+ File", &["edf"]) // TODO: Save and reuse last location
+                    .add_filter("EDF/EDF+ File", &["edf"]) // TODO: Save and reuse last location
                     .pick_files() {
                         if let Some(project) = &mut self.project_creation {
                             // TODO: Skip all files which are already present in the added data (and maybe also check for duplicates in current list
                             //       which would probably be useless as you most likely cannot select a file twice)
                             let signals = files.iter().filter_map(|path| {
-                                path.to_str().map(|s| (EdfReader::open(s.to_string()).ok(), s.to_string()))
+                                path.to_str().map(|s| (EDFFile::open(s.to_string()).ok(), s.to_string()))
                             }).map(|(edf, path)| {
-                                let mut duration = 0;
+                                let mut duration = 0.0;
                                 let mut signal_count = 0;
                                 let mut timestamp = 0;
 
-                                // Due to limitations of the edfplus crate valid EDF+ files will not be parsable without the
-                                // `EDF+C` value in the header at position 192, therefore the values cannot be read. Instead
-                                // set default values and ignore the issue for now.
                                 if let Some(edf) = edf {
-                                    let header = edf.header();
-                                    duration = header.file_duration / 10_000_000;
-                                    signal_count = header.signals.len();
-                                    timestamp = header.start_date.and_time(header.start_time).and_utc().timestamp() as u64;
+                                    let header = edf.header;
+                                    duration = header.get_record_count().map(|c| c as f64 * header.get_record_duration()).unwrap_or(0.0);
+                                    signal_count = header.get_signals().len();
+                                    timestamp = header.start_date().and_time(header.get_start_time()).and_utc().timestamp() as u64;
                                 };
 
                                 // TODO: In case there already is a file with this name in the current signals, append a -<NUMERIC> to make it unique
@@ -603,12 +599,12 @@ impl NoctiG {
             _ => None,
         })
     }
-    
+
     pub fn theme<'a>(&'a self) -> Option<Theme> {
         Some(
             Theme::custom_with_fn(
-                "ClearDark".to_string(), 
-                formatting::theme::CLEAR_DARK, 
+                "ClearDark".to_string(),
+                formatting::theme::CLEAR_DARK,
                 formatting::theme::generate_extended
             )
         )
@@ -617,7 +613,7 @@ impl NoctiG {
 
 fn resize_window(new_size: Size) -> Task<Message> {
     // TODO: Show some transition page which does not have scaling artifacts
-    
+
     window::oldest().and_then(move |id| {
         window::size(id).then(move |old_size| {
             window::position(id).then(move |old_position| {
@@ -645,24 +641,24 @@ fn move_axis(app: &mut NoctiG, direction: i8) -> bool {
     // Ensure not to surpass the last possible epoch across all readers
     let max_epoch_reader = project.readers.iter().max_by(|r1, r2| r1.get_epoch_count().cmp(&r2.get_epoch_count())).unwrap();
     let max_epoch = max_epoch_reader.get_epoch_count();
-    let current_epoch = max_epoch_reader.get_current_epoch();
+    let current_epoch = max_epoch_reader.get_window_start_epoch();
+
     if current_epoch == max_epoch - 1 && direction == 1 {
         return false;
     }
-    
+
     // Move and read all visible samples
     for reader in &mut project.readers {
-        let segment_sample_count = reader.get_epoch_sample_count();
         let segment_count = project.project.epochs_before_current as usize + project.project.epochs_after_current as usize + 1;
-        seek_segmented(reader, segment_sample_count, segment_count, direction);
+        seek_segmented(reader, segment_count, direction);
     }
 
     true
 }
 
-fn seek_segmented(reader: &mut MultiEdfReader, segment_sample_count: u64, segment_count: usize, direction: i8) {
-    let _ = reader.seek(reader.tell().unwrap() - segment_sample_count as i64 * (segment_count as i64 - direction as i64));
-    reader.read_physical_samples(segment_sample_count as usize * segment_count).unwrap();
+fn seek_segmented(reader: &mut EpochReader, segment_count: usize, direction: i8) {
+    let _ = reader.seek(u64::try_from(reader.tell() - (EpochReader::EPOCH_DURATION as i128 * 1_000 * (segment_count as i128 - direction as i128))).unwrap_or(0));
+    reader.read_epochs(segment_count).unwrap();
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Hash, Eq)]
@@ -737,14 +733,14 @@ enum Message {
     SwitchPage(Page),
 
     OpenScorer,
-    
+
     // Start page
     ProjectSearchChanged(String),
     CreateProjectWizard,
     CreateProjectWizardError(String),
     OpenProjectPath(String),
     OpenProject,
-    
+
     // Project Creation Wizard
     CancelCreateProject,
     CreateProject,

@@ -48,22 +48,6 @@ fn view_edf<'a>(source: &ProjectSignals) -> Element<'a, Message>  {
     let duration = formatters::hms_separate(source.duration as u64);
     let signal_count = source.signal_count;
 
-    // Show information about the added signal, if the EDF file could not be read,
-    // (probably due to the `EDF+C` header value issue, display placeholder info)
-    let is_invalid_edf = source.timestamp == 0 && source.duration == 0 && source.signal_count == 0;
-    let info = if is_invalid_edf {
-        row![
-            text("(Unable to load header metadata)").style(theme::text_secondary).size(12.0),
-        ].spacing(16.0)
-    }
-    else {
-        row![
-            text(format!("{} Signals", signal_count)).style(theme::text_secondary).size(12.0),
-            text(start_time).style(theme::text_secondary).size(12.0),
-            text(duration).style(theme::text_secondary).size(12.0),
-        ].spacing(16.0)
-    };
-
     container(
         container(row![
             space().width(4.0),
@@ -73,7 +57,11 @@ fn view_edf<'a>(source: &ProjectSignals) -> Element<'a, Message>  {
             column![
                 text(source.name.clone()).style(theme::text_primary),
                 text(source.path.clone()).style(theme::text_secondary).size(12.0),    // TODO: Make this ellipsis in case of too small of available space
-                info
+                row![
+                    text(format!("{} Signals", signal_count)).style(theme::text_secondary).size(12.0),
+                    text(start_time).style(theme::text_secondary).size(12.0),
+                    text(duration).style(theme::text_secondary).size(12.0),
+                ].spacing(16.0)
             ].spacing(1.0).width(Length::Fill).padding([0.0, 24.0]),
 
             button(fa_icon_solid("xmark").color(theme::CLEAR_DARK_TEXT_SECONDARY).size(12.0))

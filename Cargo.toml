@@ -20,8 +20,8 @@ iced_font_awesome = "0.4.1"
 log = "0.4.28"
 env_logger = "0.11.8"
 
-# EDF+ file parser
-edfplus = "0.1.0"
+# EDF/EDF+ file parser
+edf-rs = "0.1.1"
 
 # File picker dialog
 rfd = "0.16.0"

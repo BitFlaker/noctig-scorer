@@ -25,10 +25,10 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
         project.readers.iter().map(|reader| {
             let base_index = index;
             index += reader.signal_count();
-            
+
             Column::from_iter(
-                reader.get_chart_signals().into_iter().map(|signal| 
-                    Liner::from_chart_signal(signal, base_index, app.draw_ranges, project.project.epochs_before_current, project.project.epochs_after_current)).map(|l| 
+                reader.get_chart_signals().into_iter().map(|signal|
+                    Liner::from_chart_signal(signal, base_index, app.draw_ranges, project.project.epochs_before_current, project.project.epochs_after_current)).map(|l|
                         Canvas::new(l)
                             .width(Length::Fill)
                             .height(Length::Fixed(100.0 + 2.0 * SIGNAL_PADDING_VERTICAL))
@@ -40,7 +40,7 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
 
     let default_reader = project.readers.iter().max_by(|r1, r2| r1.get_epoch_count().cmp(&r2.get_epoch_count())).unwrap();
 
-    let current_seg_n = default_reader.get_current_epoch();
+    let current_seg_n = default_reader.get_window_start_epoch();
     let start_segment = current_seg_n.saturating_sub(project.project.epochs_before_current as u64);
     let end_segment = current_seg_n + project.project.epochs_after_current as u64 + 1;
 
@@ -48,8 +48,8 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
     let underflow = (project.project.epochs_before_current as u64).saturating_sub(current_seg_n);
     let max_epoch = default_reader.get_epoch_count();
 
-    // TODO: The start timestamp has to be taken from the least offset reader (if there are multiple, 
-    // take the earliest / allow user to choose (some recording devices might have wrong timestamp due 
+    // TODO: The start timestamp has to be taken from the least offset reader (if there are multiple,
+    // take the earliest / allow user to choose (some recording devices might have wrong timestamp due
     // to clock drift, etc) there might be a trusted source file too though and then we would have to calculate
     // the actual start timestamp by reducing the timestamp by the offset between the earlist record and the selected one)
     // Potentially prompt the user after first opening the project (only when there are multiple different timestamps) which one to use
@@ -78,7 +78,7 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
             text("Sleep-Scoring"),
 
             space().width(Length::Fill),
-            
+
             // TODO: Add integrated windowing buttons and improve design
         ].spacing(8.0).width(Length::Fill),
 

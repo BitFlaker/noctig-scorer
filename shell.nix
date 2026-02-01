@@ -3,10 +3,10 @@
 let
   rustOverlay = import (builtins.fetchTarball https://github.com/oxalica/rust-overlay/archive/master.tar.gz);
   pkgsWithOverlay = import <nixpkgs> { overlays = [ rustOverlay ]; };
-in 
+in
 pkgsWithOverlay.mkShell {
   buildInputs = with pkgs; [
-    pkgsWithOverlay.rust-bin.stable.latest.default
+    pkgsWithOverlay.rust-bin.stable.latest.complete
     gcc
     cargo
     rustup
@@ -34,8 +34,7 @@ pkgsWithOverlay.mkShell {
     export RUSTUP_TOOLCHAIN=stable
   '';
 
-  RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+  RUST_SRC_PATH = "${pkgsWithOverlay.rust.packages.stable.rustPlatform.rustLibSrc}";
   PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
   WGPU_BACKEND = "Vulkan";
 }
-
