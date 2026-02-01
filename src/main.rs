@@ -14,7 +14,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 use env_logger::Builder;
-use log::LevelFilter;
+use log::{LevelFilter, warn};
 
 use crate::layout::create_project::create_viewer;
 use crate::layout::{scorer, start};
@@ -539,6 +539,14 @@ impl NoctiG {
                     };
                 }
             },
+            Message::ShowSourceCode => {
+                if let Err(error) = webbrowser::open("https://github.com/BitFlaker/noctig-scorer") {
+                    warn!("Error opening source code in default browser: {}", error);
+                }
+            },
+            Message::ShowPrivacyPolicy => {
+                panic!("NYI")
+            }
         }
 
         Task::none()
@@ -740,6 +748,8 @@ enum Message {
     CreateProjectWizardError(String),
     OpenProjectPath(String),
     OpenProject,
+    ShowSourceCode,
+    ShowPrivacyPolicy,
 
     // Project Creation Wizard
     CancelCreateProject,

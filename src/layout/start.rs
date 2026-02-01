@@ -73,7 +73,7 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
                         .height(Length::Fill)
                         .align_y(Vertical::Center)
                     ],
-                    
+
                     button("New project")
                         .style(theme::button_primary)
                         .on_press(Message::CreateProjectWizard)
@@ -113,7 +113,7 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
                 row![
                     button(text("Privacy Policy").size(12.0))
                         .style(theme::button_text_secondary)
-                        .on_press(Message::SwitchPage(Page::Licenses))
+                        .on_press(Message::ShowPrivacyPolicy)
                         .padding([4.0, 8.0]),
 
                     container(text("•")
@@ -130,7 +130,7 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
 
                     button(fa_icon_brands("github").color(theme::CLEAR_DARK_TEXT_SECONDARY).size(14.0))
                         .style(theme::button_text_secondary)
-                        .on_press(Message::SwitchPage(Page::Licenses))
+                        .on_press(Message::ShowSourceCode)
                         .padding(8.0)
                 ]
             ],
@@ -153,8 +153,8 @@ fn view_branding<'a>() -> Element<'a, Message>  {
 }
 
 fn view_project<'a>() -> Element<'a, Message>  {
-    let path = "/home/user/Projects/Test.ngp";
-    
+    let path = "/home/david/Downloads/nocti/TEST/TEST.ngp";
+
     button(
         container(row![
             space().width(4.0),

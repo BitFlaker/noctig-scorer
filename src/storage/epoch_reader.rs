@@ -1,6 +1,5 @@
 use edf_rs::record::{RelativeRecordData, SpanningRecord};
 use edf_rs::{file::EDFFile, headers::signal_header::SignalHeader};
-use log::warn;
 use std::{error::Error, iter::repeat_n, path::Path};
 
 pub struct ChartSignal {
@@ -57,10 +56,15 @@ impl EpochReader {
         let Some(signal) = self.file.header.get_signals().get(0) else {
             return 0;
         };
+
         let samples_per_second = signal.samples_count as f64 / self.file.header.get_record_duration();
         let samples_per_epoch = samples_per_second * Self::EPOCH_DURATION as f64;
         let total_sample_count = signal.samples_count as u128 * self.file.header.get_record_count().unwrap_or(0) as u128;
-        (total_sample_count + self.offset as u128).div_ceil(samples_per_epoch as u128) as u64
+
+        let freq = self.file.header.get_signal_sample_frequency(0).unwrap();
+        let offset_samples = (freq * self.offset as f64 / 1000.0).floor() as u128;
+
+        (total_sample_count + offset_samples).div_ceil(samples_per_epoch as u128) as u64
     }
 
     pub fn get_start_align_epoch_count(&self) -> u64 {
