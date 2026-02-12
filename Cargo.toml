@@ -13,15 +13,22 @@ edition = "2024"
 
 [dependencies]
 # UI crates
-iced = { version = "0.14.0", features = ["wayland", "canvas", "image", "svg"] }
+iced = { version = "0.14.0", features = ["wayland", "canvas", "advanced", "image", "svg"] }
 iced_font_awesome = "0.4.1"
+bytemuck = "1.25.0"
+
+# Computing
+ndarray = { version = "0.17.2", features = ["rayon"] }
+ndarray-npy = { version = "0.10.0", features = ["npz"] }
+rayon = "1.11.0"
+realfft = "3.5.0"
 
 # Logging
 log = "0.4.28"
 env_logger = "0.11.8"
 
 # EDF/EDF+ file parser
-edf-rs = "0.1.1"
+edf-rs = "0.1.2"
 
 # File picker dialog
 rfd = "0.16.0"

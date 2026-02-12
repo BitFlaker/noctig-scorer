@@ -21,6 +21,7 @@ A cross platform tool for manual sleep scoring written in Rust. It is capable of
 The current state of this application allows you to do the following:
 * Create and configure projects
 * Load multiple EDF files and display their signals
+* Generate spectrogram from signal data
 * Score epochs as Wake/REM/N1/N2/N3
 * Easily accessible and readable data (Stages stored in JSON file, etc.)
 
@@ -74,4 +75,3 @@ This project is licensed under either of
 
 
 at your option.
-

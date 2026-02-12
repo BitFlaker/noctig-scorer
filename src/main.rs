@@ -1,11 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]  // hide console window on Windows in release
 
 use edf_rs::file::EDFFile;
+use iced::futures::channel::mpsc::Sender;
+use iced::futures::{SinkExt, Stream};
 use iced::{Element, Point, Size, Task, Theme, window};
 use iced::keyboard::{key::Named, Key};
 use iced::event::Status;
 use iced::event;
 use iced::widget;
+use ndarray::Array1;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -13,23 +16,30 @@ use std::error::Error;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::sync::LazyLock;
 use env_logger::Builder;
 use log::{LevelFilter, warn};
+use iced::stream::channel;
 
+use crate::external::lspopt::spectrogram_lspopt;
+use crate::external::scipy::Spectrogram;
 use crate::layout::create_project::create_viewer;
 use crate::layout::{scorer, start};
 use crate::storage::epoch_reader::EpochReader;
-use crate::formatting::theme::{border_background_base, text_foreground_base};
+use crate::formatting::theme::{CLEAR_DARK_TEXT_SECONDARY, border_background_base, text_foreground_base};
 use crate::storage::project_initializer;
+use crate::views::spectrogram::widget::SpectrogramView;
 
 mod layout;
 mod formatting;
 mod storage;
 mod views;
 mod macros;
+mod external;
+
 
 pub const ICON: &[u8] = include_bytes!("../resources/icon.svg");
-// const ICON_TINTED: LazyLock<Vec<u8>> = LazyLock::new(|| include_str!("../../resources/icon.svg").replace("fill:#ffffff", "fill:#127cda").replace("stroke:#ffffff", "stroke:#127cda").into_bytes());
+pub const ICON_SECONDARY: LazyLock<Vec<u8>> = LazyLock::new(|| include_str!("../resources/icon.svg").replace("fill:#ffffff", &format!("fill:{}", CLEAR_DARK_TEXT_SECONDARY.to_string())).replace("stroke:#ffffff", &format!("stroke:{}", CLEAR_DARK_TEXT_SECONDARY.to_string())).into_bytes());
 
 // TODO: Setting for preventing to cache the last file picker dialog location
 
@@ -193,7 +203,9 @@ pub struct CurrentProject {
     project: Project,
     markers: Markers,
     annotations: Annotations,
-    scorings: Option<Scorings>
+    scorings: Option<Scorings>,
+    spectrogram: Option<SpectrogramView>,
+    loading_progress_spectrogram: Option<f32>
 }
 
 struct NoctiG {
@@ -228,7 +240,9 @@ impl CurrentProject {
             project,
             markers: Markers::default(),
             annotations: Annotations::default(),
-            scorings: None
+            scorings: None,
+            spectrogram: None,
+            loading_progress_spectrogram: None
         };
 
         result.load_labels()?;
@@ -305,6 +319,47 @@ impl NoctiG {
         }, Task::none())
     }
 
+    fn calculate_spectrogram(path: String, source_path: String, signal_index: usize) -> impl Stream<Item = Message> {
+        channel(0, move |mut output: Sender<Message>| async move {
+            output.send(Message::SpectrogramLoadStart).await.unwrap();
+
+            const SAMPLE_LOAD_PERCENTAGE: f32 = 0.75;
+
+            let mut reader = EDFFile::open(&Path::new(&path).join(&source_path)).unwrap();
+
+            // Get the target signal header
+            let signal = reader.header.get_signals().get(signal_index).cloned().unwrap();
+
+            // Get parameters from record and signal headers
+            let sf = reader.header.get_signal_sample_frequency(signal_index).unwrap();
+            let win_sec = 30.0;
+            let nperseg = (win_sec * sf) as i32;
+            let record_count = reader.header.get_record_count().unwrap();
+            let record_samples = signal.samples_count;
+            let sample_count = record_samples * record_count;
+
+            // Collect all samples of the target signal across all records
+            let mut i = 0;
+            let mut spectro_samples = vec![0.0; sample_count];
+            let mut last_progress = 0;
+            while let Ok(Some(record)) = reader.read_record() {
+                spectro_samples[i * record_samples..(i + 1) * record_samples].copy_from_slice(&record.get_physical_samples(&signal)[signal_index]);
+                i += 1;
+                let progress = (100.0 * i as f32 / record_count as f32).round() as u16;
+                if progress > last_progress {
+                    last_progress = progress;
+                    output.send(Message::SpectrogramLoadProgress(progress as f32 * SAMPLE_LOAD_PERCENTAGE)).await.unwrap();
+                }
+            }
+
+            // Calculate the spectrogram from the collected samples
+            let spectro_samples = Array1::<f64>::from_vec(spectro_samples);
+            let spectrogram = spectrogram_lspopt(spectro_samples, sf, nperseg);
+
+            output.send(Message::SpectrogramLoadFinish(spectrogram)).await.unwrap();
+        })
+    }
+
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::MoveAxis(direction) => {
@@ -330,6 +385,21 @@ impl NoctiG {
                             .or_insert(stage);
                     }
                 }
+            },
+            Message::SpectrogramLoadStart => {
+
+            },
+            Message::SpectrogramLoadProgress(progress) => {
+                let Some(project) = &mut self.current_project else {
+                    return Task::none();
+                };
+                project.loading_progress_spectrogram = Some(progress);
+            },
+            Message::SpectrogramLoadFinish(spectrogram) => {
+                let Some(project) = &mut self.current_project else {
+                    return Task::none();
+                };
+                project.spectrogram = Some(SpectrogramView::new(spectrogram, "lajolla".to_string()));
             },
             Message::SeekTo => {
                 let epoch = 1100;
@@ -423,9 +493,19 @@ impl NoctiG {
                     return Task::none();
                 }
 
+                let Some(project) = &mut self.current_project else {
+                    return Task::none();
+                };
+                project.spectrogram = None;
+                project.loading_progress_spectrogram = Some(0.0);
+                let source_path = project.project.signals.get(1).unwrap().path.clone();
+
                 // Change the page to the scorer and resize the window
                 self.current_page = Page::Scorer;
-                return resize_window(Size::new(1400.0, 800.0));
+                return Task::batch([
+                    Task::stream(Self::calculate_spectrogram(project.path.clone(), source_path, 0)),
+                    resize_window(Size::new(1400.0, 800.0))
+                ]);
             },
             Message::CreateProjectWizardError(error) => {
                 // TODO: Open dialog box
@@ -733,6 +813,9 @@ impl Stage {
 enum Message {
     MoveAxis(i8),
     Rate(Stage),
+    SpectrogramLoadStart,
+    SpectrogramLoadProgress(f32),
+    SpectrogramLoadFinish(Spectrogram),
     CycleTimeFormatter,
     ToggleRangeDraw,
     ToggleHelp,

@@ -1,10 +1,13 @@
-use iced::widget::{Canvas, Column, Id, Row, Space, column, container, row, scrollable, space, stack, text};
+use iced::widget::svg::Handle;
+use iced::widget::{Canvas, Column, Id, Row, Space, center, column, container, row, scrollable, shader, space, stack, svg, text};
 use iced::{Alignment, Element, Length, Padding};
 use iced::alignment::Vertical;
 use std::sync::LazyLock;
 use itertools::Itertools;   // Required until `intersperse_with` is stabilized
 
-use crate::key_legend;
+use crate::formatting::font::REGULAR_BOLD;
+use crate::formatting::theme::SPECTROGRAM_BORDER_WIDTH;
+use crate::{CurrentProject, ICON_SECONDARY, key_legend};
 use crate::{Message, NoctiG, Stage};
 use crate::formatting::{formatters, theme};
 use crate::views::line_chart::Liner;
@@ -19,6 +22,8 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
     let Some(scorings) = &project.scorings else {
         return space().into();
     };
+
+    let spectrogram_view = view_spectrogram(&project);
 
     let mut index = 0;
     let signals = Column::from_vec(
@@ -73,16 +78,40 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
 
     column![
         row![
-            text("NoctiG Scorer"),
-            text("SomeProject.ngp*"),
-            text("Sleep-Scoring"),
+            // when hovered -> Primary-Text-Color --> when clicked --> Open Menu
+            container(row![
+                svg(Handle::from_memory(ICON_SECONDARY.clone())).width(32.0),
+                text("NoctiG Scorer").font(*REGULAR_BOLD).size(15.0).style(theme::text_secondary),
+            ].align_y(Vertical::Center).spacing(8.0)),
+
+            text("SomeProject.ngp*").style(theme::text_primary),
+            // text("Sleep-Scoring"),
 
             space().width(Length::Fill),
 
             // TODO: Add integrated windowing buttons and improve design
-        ].spacing(8.0).width(Length::Fill),
+        ]
+        .align_y(Vertical::Center)
+        .spacing(16.0)
+        .padding([12.0, 16.0])
+        .width(Length::Fill),
 
-        Space::new().height(24),
+        container(stack![
+            spectrogram_view,
+
+            container(space())
+                .style(theme::container_spectrogram)
+                .width(Length::Fill)
+                .height(Length::Fill),
+        ]).padding(Padding {
+            left: 24.0,
+            right: 24.0,
+            top: 0.0,
+            bottom: 8.0
+        })
+        .height(Length::Fixed(256.0)),
+
+        Space::new().height(12.0),
 
         stack!(
             scrollable(
@@ -127,4 +156,44 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
             ]
         ).style(theme::status_bar)
     ].width(Length::Fill).into()
+}
+
+fn view_spectrogram<'a>(project: &'a CurrentProject) -> Element<'a, Message> {
+    if let Some(spectrogram) = &project.spectrogram {
+        return container(shader(spectrogram)
+            .width(Length::Fill)
+            .height(Length::Fill)
+        ).padding(SPECTROGRAM_BORDER_WIDTH - 0.5).into()
+    }
+
+    // No spectrogram available and not currently loading
+    let Some(progress) = &project.loading_progress_spectrogram else {
+        return space().into();
+    };
+
+    // Loading notice
+    let loading = center(text("Loading ...").style(theme::text_secondary))
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    // Empty progress bar
+    if *progress as u16 == 0 {
+        return loading.into();
+    }
+
+    // Loading progress with loading notice
+    stack!(
+        row![
+            container(space())
+                .style(theme::container_loading_spectrogram)
+                .width(Length::FillPortion(*progress as u16))
+                .height(Length::Fill),
+
+            space()
+                .width(Length::FillPortion(100 - *progress as u16))
+                .height(Length::Fill),
+        ],
+
+        loading,
+    ).into()
 }

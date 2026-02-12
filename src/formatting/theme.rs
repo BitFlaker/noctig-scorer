@@ -1,4 +1,5 @@
 use iced::border;
+use iced::border::Radius;
 use iced::theme::palette::Danger;
 use iced::theme::palette::Primary;
 use iced::theme::palette::Secondary;
@@ -13,6 +14,8 @@ use iced::theme::palette::Background;
 use iced::Color;
 
 use crate::Stage;
+
+pub const SPECTROGRAM_BORDER_WIDTH: f32 = 2.0;
 
 // **************
 // Color Palettes
@@ -61,15 +64,15 @@ pub const CLEAR_LIGHT_STAGES: StagePalette = StagePalette {
 
 pub fn generate_extended(palette: Palette) -> palette::Extended {
     palette::Extended {
-        background: Background { 
-            base:      Pair::new(CLEAR_DARK.background, palette.text), 
-            weakest:   Pair::new(rgba8!( 22,  22,  22), palette.text), 
-            weaker:    Pair::new(rgba8!( 44,  44,  44), palette.text), 
-            weak:      Pair::new(rgba8!( 50,  50,  50), palette.text), 
-            neutral:   Pair::new(rgba8!( 56,  56,  56), palette.text), 
+        background: Background {
+            base:      Pair::new(CLEAR_DARK.background, palette.text),
+            weakest:   Pair::new(rgba8!( 22,  22,  22), palette.text),
+            weaker:    Pair::new(rgba8!( 44,  44,  44), palette.text),
+            weak:      Pair::new(rgba8!( 50,  50,  50), palette.text),
+            neutral:   Pair::new(rgba8!( 56,  56,  56), palette.text),
             strong:    Pair::new(rgba8!( 62,  62,  62), palette.text),
             stronger:  Pair::new(rgba8!( 68,  68,  68), palette.text),
-            strongest: Pair::new(rgba8!( 74,  74,  74), palette.text) 
+            strongest: Pair::new(rgba8!( 74,  74,  74), palette.text)
         },
         primary: Primary::generate(
             palette.primary,
@@ -149,6 +152,35 @@ fn container_stage_base(color: Color) -> widget::container::Style {
     }
 }
 
+pub fn container_loading_spectrogram(theme: &Theme) -> widget::container::Style {
+    let color = theme.extended_palette().background.weak.color;
+    widget::container::Style {
+        background: Some(color.into()),
+        border: border::Border {
+            radius: Radius {
+                top_left: 8.0,
+                bottom_left: 8.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..widget::container::Style::default()
+    }
+}
+
+pub fn container_spectrogram(theme: &Theme) -> widget::container::Style {
+    let color = theme.extended_palette().background.weak.color;
+    widget::container::Style {
+        background: None,
+        border: border::Border {
+            width: SPECTROGRAM_BORDER_WIDTH,
+            radius: 8.0.into(),
+            color,
+        },
+        ..widget::container::Style::default()
+    }
+}
+
 pub fn container_tag(theme: &Theme) -> widget::container::Style {
     let stroke = theme.extended_palette().background.weak.color;
     let mut style = container_stage_base(stroke);
@@ -191,9 +223,9 @@ pub fn container_secondary(theme: &Theme) -> widget::container::Style {
 
     widget::container::Style {
         background: Some(palette.secondary.weak.color.into()),
-        border: iced::Border { 
-            radius: 10.0.into(), 
-            ..Default::default() 
+        border: iced::Border {
+            radius: 10.0.into(),
+            ..Default::default()
         },
         ..Default::default()
     }
@@ -201,7 +233,7 @@ pub fn container_secondary(theme: &Theme) -> widget::container::Style {
 
 pub fn container_counter(theme: &Theme, is_current: bool) -> widget::container::Style {
     let palette = theme.palette();
-    
+
     let color_current = palette.text;
     let color_other = Color::TRANSPARENT;
 
@@ -219,7 +251,7 @@ pub fn container_counter(theme: &Theme, is_current: bool) -> widget::container::
 
 pub fn text_counter(theme: &Theme, is_current: bool) -> widget::text::Style {
     let palette = theme.extended_palette();
-    
+
     let color_text_current = palette.background.weakest.color;
     let color_text_other = CLEAR_DARK_TEXT_SECONDARY;
 
@@ -244,7 +276,7 @@ pub fn checkbox(theme: &Theme, status: iced::widget::checkbox::Status) -> widget
 pub fn button_current_create_page(theme: &Theme, status: iced::widget::button::Status, is_current: bool) -> widget::button::Style {
     let palette = theme.palette();
     let mut style = button_text_secondary(theme, status);
-    
+
     let color_text_other = CLEAR_DARK_TEXT_SECONDARY;
     let color_text_current = palette.text;
 
@@ -274,7 +306,7 @@ pub fn button_primary(theme: &Theme, status: iced::widget::button::Status) -> wi
 pub fn button_text(theme: &Theme, status: iced::widget::button::Status) -> widget::button::Style {
     use iced::widget::button::text;
     use iced::widget::button::Status;
-    
+
     let palette = theme.extended_palette();
     let color = palette.background.neutral.color;
     let text_color = palette.background.neutral.text;
