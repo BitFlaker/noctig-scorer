@@ -84,12 +84,11 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
                 text("NoctiG Scorer").font(*REGULAR_BOLD).size(15.0).style(theme::text_secondary),
             ].align_y(Vertical::Center).spacing(8.0)),
 
-            text("SomeProject.ngp*").style(theme::text_primary),
-            // text("Sleep-Scoring"),
+            text(format!("{}*", project.project_name)).style(theme::text_primary),
 
             space().width(Length::Fill),
 
-            // TODO: Add integrated windowing buttons and improve design
+            // TODO: Add integrated windowing buttons
         ]
         .align_y(Vertical::Center)
         .spacing(16.0)

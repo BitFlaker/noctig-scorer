@@ -9,7 +9,7 @@ pub fn view<'a>(project: &'a ProjectConfiguration) -> Element<'a, Message> {
 
     // Build tags
     let tags = Row::from_iter(
-        project.tags.iter().enumerate().map(|(i, tag)| 
+        project.tags.iter().enumerate().map(|(i, tag)|
             container(
                 row![
                     text(tag).size(14.0),
@@ -20,11 +20,11 @@ pub fn view<'a>(project: &'a ProjectConfiguration) -> Element<'a, Message> {
                         .padding(0)
                         .style(theme::button_secondary)
                 ].spacing(4.0).align_y(Vertical::Center)
-            ).padding(Padding { 
-                left: 8.0, 
-                top: 0.0, 
-                right: 0.0, 
-                bottom: 0.0 
+            ).padding(Padding {
+                left: 8.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0
             }).style(theme::container_tag).into()
         )
     );
@@ -56,7 +56,7 @@ pub fn view<'a>(project: &'a ProjectConfiguration) -> Element<'a, Message> {
 
                         button("Browse")
                             .style(theme::button_secondary)
-                            .on_press(Message::BrowseProjectLocation)
+                            .on_press(Message::LaunchBrowseProjectLocation)
                             .padding([8.0, 12.0])
                     ].spacing(8.0)
                 ].spacing(6.0),

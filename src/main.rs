@@ -9,18 +9,21 @@ use iced::event::Status;
 use iced::event;
 use iced::widget;
 use ndarray::Array1;
-use rfd::FileDialog;
+use rfd::AsyncFileDialog;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use env_logger::Builder;
 use log::{LevelFilter, warn};
 use iced::stream::channel;
 
+use crate::database::types::RecentProject;
+use crate::database::{get_last_browse_source_path, get_last_project_create_path, get_last_project_path, get_recently_opened, set_last_browse_source_path, set_last_project_create_path, set_last_project_path, update_recently_opened};
 use crate::external::lspopt::spectrogram_lspopt;
 use crate::external::scipy::Spectrogram;
 use crate::layout::create_project::create_viewer;
@@ -36,7 +39,7 @@ mod storage;
 mod views;
 mod macros;
 mod external;
-
+mod database;
 
 pub const ICON: &[u8] = include_bytes!("../resources/icon.svg");
 pub const ICON_SECONDARY: LazyLock<Vec<u8>> = LazyLock::new(|| include_str!("../resources/icon.svg").replace("fill:#ffffff", &format!("fill:{}", CLEAR_DARK_TEXT_SECONDARY.to_string())).replace("stroke:#ffffff", &format!("stroke:{}", CLEAR_DARK_TEXT_SECONDARY.to_string())).into_bytes());
@@ -199,6 +202,7 @@ pub struct ProjectSignals {
 
 pub struct CurrentProject {
     path: String,
+    project_name: String,
     readers: Vec<EpochReader>,
     project: Project,
     markers: Markers,
@@ -214,14 +218,18 @@ struct NoctiG {
     draw_ranges: bool,
     is_showing_help: bool,
     search_text: String,
+    search_task_id: String,
     project_creation: Option<ProjectConfiguration>,
-    current_project: Option<CurrentProject>
+    current_project: Option<CurrentProject>,
+    recent_projects: Vec<RecentProject>,
+    filtered_recent_projects: Option<Vec<RecentProject>>,
 }
 
 impl CurrentProject {
     pub fn load<P>(path: P) -> Result<Self, Box<dyn Error>> where P : AsRef<Path> {
         let project_xml = fs::read_to_string(&path)?;
         let project = serde_xml_rs::from_str::<Project>(&project_xml)?;
+        let project_name = path.as_ref().file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or(String::new());
         let path = path.as_ref().parent().unwrap().to_string_lossy().to_string();
 
         let readers = project.signals.iter().map(|source| {
@@ -236,6 +244,7 @@ impl CurrentProject {
 
         let mut result = Self {
             path,
+            project_name,
             readers,
             project,
             markers: Markers::default(),
@@ -315,8 +324,11 @@ impl NoctiG {
             is_showing_help: false,
             project_creation: None,
             search_text: String::new(),
-            current_project: None
-        }, Task::none())
+            current_project: None,
+            recent_projects: Vec::new(),
+            search_task_id: String::new(),
+            filtered_recent_projects: None
+        }, Task::done(Message::LoadStartPage))
     }
 
     fn calculate_spectrogram(path: String, source_path: String, signal_index: usize) -> impl Stream<Item = Message> {
@@ -362,6 +374,11 @@ impl NoctiG {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::LoadStartPage => {
+                if let Ok(recent) = get_recently_opened(25) {
+                    self.recent_projects = recent;
+                }
+            }
             Message::MoveAxis(direction) => {
                 if !move_axis(self, direction) {
                     return Task::none();
@@ -458,21 +475,45 @@ impl NoctiG {
                 }
                 return Task::done(Message::OpenScorer);
             },
-            Message::OpenProject => {
-                // TODO: Prevent unresponsive warning while picking location
-                let file = FileDialog::new()
-                    .add_filter("NoctiG Project", &["ngp"])
-                    .set_directory("/") // TODO: Save and reuse last location
-                    .pick_file();
+            Message::LaunchOpenProject => {
+                let path = get_last_project_path()
+                    .ok()
+                    .flatten()
+                    .unwrap_or(String::new());
 
+                return Task::future(async {
+                    Message::OpenProject(AsyncFileDialog::new()
+                        .add_filter("NoctiG Project", &["ngp"])
+                        .set_directory(path)
+                        .pick_file()
+                        .await
+                        .map(|h| h.path().to_path_buf()))
+                })
+            }
+            Message::OpenProject(file) => {
                 let Some(file) = file else {
                     return Task::none();
                 };
 
+                if let Some(parent) = file.parent() && let Some(path) = parent.to_str() {
+                    _ = set_last_project_path(path.to_string());
+                }
+
+                let path = file.to_str().map(|p| p.to_string());
+
                 match CurrentProject::load(file) {
-                    Ok(project) => self.current_project = Some(project),
+                    Ok(project) => {
+                        if let Some(path) = path {
+                            _ = update_recently_opened(
+                                project.project.name.clone(),
+                                path.clone()
+                            ).unwrap();
+                        }
+                        self.current_project = Some(project);
+                    },
                     Err(e) => eprintln!("Error opening project: {}", e) // TODO: Show error message box
                 }
+
                 return Task::done(Message::OpenScorer);
             },
             Message::CancelCreateProject => {
@@ -482,7 +523,6 @@ impl NoctiG {
             Message::CreateProject => {
                 // TODO: Require a project name and a location and at least 1 added signal source with at least 1 signal
                 //       If not provided, jump to the first erroring page and highlight the field
-                // TODO: Combine EDFs with equal header to same group, create project structure
                 if let Some(project) = self.project_creation.take() {
                     return project_initializer::create_new(project);
                 }
@@ -512,10 +552,39 @@ impl NoctiG {
                 eprintln!("{error}");
             },
             Message::ProjectSearchChanged(search) => {
-                self.search_text = search;
+                self.search_text = search.clone();
 
-                // TODO: Cancel old search process and invoke new one
-            },
+                // Clear the filter in case the field was cleared
+                if search.is_empty() {
+                    self.filtered_recent_projects = None;
+                    return Task::none();
+                }
+                let search = search.to_lowercase();
+
+                // Get a somewhat unique identifier for the search to prevent showing results
+                // from a previous search that took longer than a subsequent filter
+                let search_task_id = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or(Duration::ZERO)
+                    .as_nanos()
+                    .to_string();
+                self.search_task_id = search_task_id.clone();
+                let recent = self.recent_projects.clone();
+
+                // Perform the filtering asynchronously
+                return Task::future(async move {
+                    Message::ProjectSearchFiltered((search_task_id, recent.into_iter().filter(|p| {
+                        p.name.to_lowercase().contains(&search) || p.path.to_lowercase().contains(&search)
+                    }).collect()))
+                });
+            }
+            Message::ProjectSearchFiltered((search_task_id, filtered)) => {
+                if self.search_task_id != search_task_id {
+                    return Task::none()
+                }
+
+                self.filtered_recent_projects = Some(filtered);
+            }
             Message::ToggleFilterSignal(checked) => {
                 if let Some(project) = &mut self.project_creation {
                     project.filter_signal = checked;
@@ -560,57 +629,88 @@ impl NoctiG {
                     project.tags.remove(index);
                 }
             },
-            Message::BrowseProjectLocation => {
-                // TODO: Prevent unresponsive warning while picking location
-                if let Some(folder) = FileDialog::new()
-                    .set_directory("/") // TODO: Use the path from `project.path` or if its empty, reuse last saved location
-                    .pick_folder() {
-                        if let Some(project) = &mut self.project_creation {
-                            if let Some(path) = folder.to_str() {
-                                project.path = path.to_string();
-                            }
-                        }
-                    }
+            Message::LaunchBrowseProjectLocation => {
+                let path = get_last_project_create_path()
+                    .ok()
+                    .flatten()
+                    .unwrap_or(String::new());
+
+                return Task::future(async {
+                    Message::BrowseProjectLocation(AsyncFileDialog::new()
+                        .set_directory(path)
+                        .pick_folder()
+                        .await
+                        .map(|h| h.path().to_path_buf())
+                    )
+                });
+            }
+            Message::BrowseProjectLocation(folder) => {
+                let Some(path) = folder.map(|p| p.to_str().map(|v| v.to_string())).flatten() else {
+                    return Task::none();
+                };
+
+                _ = set_last_project_create_path(path.to_string());
+
+                if let Some(project) = &mut self.project_creation {
+                    project.path = path.to_string();
+                }
             },
-            Message::BrowseImportSignal => {
-                // TODO: Prevent unresponsive warning while picking location
-                if let Some(files) = FileDialog::new()
-                    .add_filter("EDF/EDF+ File", &["edf"]) // TODO: Save and reuse last location
-                    .pick_files() {
-                        if let Some(project) = &mut self.project_creation {
-                            // TODO: Skip all files which are already present in the added data (and maybe also check for duplicates in current list
-                            //       which would probably be useless as you most likely cannot select a file twice)
-                            let signals = files.iter().filter_map(|path| {
-                                path.to_str().map(|s| (EDFFile::open(s.to_string()).ok(), s.to_string()))
-                            }).map(|(edf, path)| {
-                                let mut duration = 0.0;
-                                let mut signal_count = 0;
-                                let mut timestamp = 0;
+            Message::LaunchBrowseImportSignal => {
+                let path = get_last_browse_source_path()
+                    .ok()
+                    .flatten()
+                    .unwrap_or(String::new());
 
-                                if let Some(edf) = edf {
-                                    let header = edf.header;
-                                    duration = header.get_record_count().map(|c| c as f64 * header.get_record_duration()).unwrap_or(0.0);
-                                    signal_count = header.get_signals().len();
-                                    timestamp = header.start_date().and_time(header.get_start_time()).and_utc().timestamp() as u64;
-                                };
+                return Task::future(async {
+                    Message::BrowseImportSignal(AsyncFileDialog::new()
+                        .add_filter("EDF/EDF+ File", &["edf"])
+                        .set_directory(path)
+                        .pick_files()
+                        .await
+                        .map(|h| h.iter().map(|h| h.path().to_path_buf()).collect())
+                    )
+                });
+            }
+            Message::BrowseImportSignal(files) => {
+                if let Some(files) = files {
+                    if let Some(first) = files.first() && let Some(parent) = first.parent() && let Some(path) = parent.to_str() {
+                        _ = set_last_browse_source_path(path.to_string());
+                    };
 
-                                // TODO: In case there already is a file with this name in the current signals, append a -<NUMERIC> to make it unique
-                                let filename = Path::new(&path).file_name()
-                                    .map(|name| name.to_string_lossy().to_string())
-                                    .unwrap_or("--".to_string());
+                    if let Some(project) = &mut self.project_creation {
+                        // TODO: Skip all files which are already present in the added data (and maybe also check for duplicates in current list
+                        //       which would probably be useless as you most likely cannot select a file twice)
+                        let signals = files.iter().filter_map(|path| {
+                            path.to_str().map(|s| (EDFFile::open(s.to_string()).ok(), s.to_string()))
+                        }).map(|(edf, path)| {
+                            let mut duration = 0.0;
+                            let mut signal_count = 0;
+                            let mut timestamp = 0;
 
-                                ProjectSignals {
-                                    timestamp,
-                                    duration,
-                                    signal_count,
-                                    path,
-                                    name: filename,
-                                    is_reference: false
-                                }
-                            });
-                            project.data.append(&mut signals.collect());
-                        }
+                            if let Some(edf) = edf {
+                                let header = edf.header;
+                                duration = header.get_record_count().map(|c| c as f64 * header.get_record_duration()).unwrap_or(0.0);
+                                signal_count = header.get_signals().len();
+                                timestamp = header.start_date().and_time(header.get_start_time()).and_utc().timestamp() as u64;
+                            };
+
+                            // TODO: In case there already is a file with this name in the current signals, append a -<NUMERIC> to make it unique
+                            let filename = Path::new(&path).file_name()
+                                .map(|name| name.to_string_lossy().to_string())
+                                .unwrap_or("--".to_string());
+
+                            ProjectSignals {
+                                timestamp,
+                                duration,
+                                signal_count,
+                                path,
+                                name: filename,
+                                is_reference: false
+                            }
+                        });
+                        project.data.append(&mut signals.collect());
                     }
+                }
             },
             Message::RemoveImportSignal(path) => {
                 if let Some(project) = &mut self.project_creation {
@@ -826,11 +926,14 @@ enum Message {
     OpenScorer,
 
     // Start page
+    LoadStartPage,
     ProjectSearchChanged(String),
+    ProjectSearchFiltered((String, Vec<RecentProject>)),
     CreateProjectWizard,
     CreateProjectWizardError(String),
     OpenProjectPath(String),
-    OpenProject,
+    LaunchOpenProject,
+    OpenProject(Option<PathBuf>),
     ShowSourceCode,
     ShowPrivacyPolicy,
 
@@ -842,8 +945,10 @@ enum Message {
     NewTagChanged(String),
     AddTag,
     RemoveTag(usize),
-    BrowseProjectLocation,
-    BrowseImportSignal,
+    LaunchBrowseProjectLocation,
+    BrowseProjectLocation(Option<PathBuf>),
+    LaunchBrowseImportSignal,
+    BrowseImportSignal(Option<Vec<PathBuf>>),
     RemoveImportSignal(String),
     ToggleFilterSignal(bool),
     ToggleClipSignal(bool),

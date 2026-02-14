@@ -1,9 +1,11 @@
+use chrono::{DateTime, Local};
 use iced::{Element, Length, Padding};
-use iced::widget::{button, stack, column, container, row, scrollable, space, svg, text, text_input};
+use iced::widget::{Column, button, center, column, container, row, scrollable, space, stack, svg, text, text_input};
 use iced::widget::svg::Handle;
 use iced::alignment::Vertical;
 use iced_font_awesome::{fa_icon, fa_icon_brands, fa_icon_solid};
 
+use crate::database::types::RecentProject;
 use crate::{ICON, Message, NoctiG, Page};
 use crate::formatting::{font, theme};
 
@@ -80,7 +82,7 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
                         .padding([8.0, 12.0]),
                     button("Open existing")
                         .style(theme::button_secondary)
-                        .on_press(Message::OpenProject)
+                        .on_press(Message::LaunchOpenProject)
                         .padding([8.0, 12.0])
                 ].spacing(8.0),
 
@@ -88,21 +90,7 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
 
                 // Recent projects list
                 container(
-                    scrollable(
-                        column![
-                            space().height(2.0),
-                            view_project(),
-                            view_project(),
-                            view_project(),
-                            view_project(),
-                            view_project(),
-                            view_project(),
-                            view_project(),
-                            view_project(),
-                            view_project(),
-                            space().height(2.0),
-                        ].padding([8.0, 12.0]),
-                    )
+                    view_recent_projects(app)
                 ).style(theme::container_recent_projects)
                     .width(Length::Fill)
                     .height(Length::Fill),
@@ -152,8 +140,33 @@ fn view_branding<'a>() -> Element<'a, Message>  {
     ).height(64.0).align_y(Vertical::Center).into()
 }
 
-fn view_project<'a>() -> Element<'a, Message>  {
-    let path = "/home/david/Downloads/nocti/TEST/TEST.ngp";
+fn view_recent_projects<'a>(app: &NoctiG) -> Element<'_, Message> {
+    if let Some(filtered) = &app.filtered_recent_projects {
+        if filtered.is_empty() {
+            center(text("No projects found for search").style(theme::text_secondary)).into()
+        }
+        else {
+            get_recents_scroller(filtered)
+        }
+    } else if !app.recent_projects.is_empty() {
+        get_recents_scroller(&app.recent_projects)
+    } else {
+        center(text("No recent projects").style(theme::text_secondary)).into()
+    }
+}
+
+fn get_recents_scroller<'a>(projects: &Vec<RecentProject>) -> Element<'a, Message> {
+    scrollable(
+        column![
+            space().height(2.0),
+            Column::from_iter(projects.iter().map(view_recent_project)),
+            space().height(2.0),
+        ].padding([8.0, 12.0]),
+    ).into()
+}
+
+fn view_recent_project<'a>(project: &RecentProject) -> Element<'a, Message>  {
+    let local_time: DateTime<Local> = DateTime::from(project.last_opened);
 
     button(
         container(row![
@@ -162,16 +175,15 @@ fn view_project<'a>() -> Element<'a, Message>  {
             fa_icon("window-maximize").size(16.0),
 
             column![
-                text("Test project").style(theme::text_primary),
-                text(path).style(theme::text_secondary).size(12.0)    // TODO: Make this ellipsis in case of too small of available space
+                text(project.name.to_string()).style(theme::text_primary),
+                text(project.path.to_string()).style(theme::text_secondary).size(12.0)    // TODO: Make this ellipsis in case of too small of available space
             ].spacing(1.0).width(Length::Fill).padding([0.0, 24.0]),
 
-            text("2025/12/22 14:44").style(theme::text_tertiary).size(12.0),
+            text(local_time.format("%x %X").to_string()).style(theme::text_tertiary).size(12.0),
 
             space().width(4.0),
         ].align_y(Vertical::Center).padding([12.0, 4.0]))
-    )
-        .on_press(Message::OpenProjectPath(path.to_string()))
+    ).on_press(Message::OpenProjectPath(project.path.to_string()))
         .style(theme::button_text_secondary)
         .into()
 }

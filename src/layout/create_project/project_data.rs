@@ -21,7 +21,7 @@ pub fn view<'a>(project: &'a ProjectConfiguration) -> Element<'a, Message> {
                     text("Add")
                 ].align_y(Vertical::Center).spacing(8.0))
                 .style(theme::button_secondary)
-                .on_press(Message::BrowseImportSignal)
+                .on_press(Message::LaunchBrowseImportSignal)
                 .padding([8.0, 12.0]),
         ].align_y(Vertical::Bottom),
 
