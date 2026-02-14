@@ -47,3 +47,6 @@ chrono = "0.4.42"
 itertools = "0.14.0"    # Only required for `intersperse_with`
 webbrowser = "1.0.6"
 md-5 = "0.10.6"
+
+[patch.crates-io]
+iced_font_awesome = { git = "https://github.com/BitFlaker/iced_font_awesome.git" }

@@ -55,7 +55,7 @@ The entire project creation / loading / saving process is currently implemented 
 
 ### Loading a project
 1. Open the application
-2. Select the `Open existing` option
+2. Select the `Open` option
 3. Browse for the `*.ngp` file in an existing project directory
 
 ### Saving a project

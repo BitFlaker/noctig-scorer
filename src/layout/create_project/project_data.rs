@@ -17,9 +17,9 @@ pub fn view<'a>(project: &'a ProjectConfiguration) -> Element<'a, Message> {
 
             button(
                 row![
-                    fa_icon_solid("plus").size(14.0),
+                    fa_icon_solid("plus").size(15.0),
                     text("Add")
-                ].align_y(Vertical::Center).spacing(8.0))
+                ].align_y(Vertical::Center).spacing(12.0))
                 .style(theme::button_secondary)
                 .on_press(Message::LaunchBrowseImportSignal)
                 .padding([8.0, 12.0]),

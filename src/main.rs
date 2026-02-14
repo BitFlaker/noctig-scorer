@@ -734,7 +734,7 @@ impl NoctiG {
 
     fn view(&self) -> Element<'_, Message> {
         match self.current_page {
-            Page::Home => start::view(self),
+            Page::Home | Page::Stream | Page::Help | Page::Settings => start::view(self),
             Page::Scorer => scorer::view(self),
             Page::CreateProject(ref page) => create_viewer::view(self, page),
             _ => panic!("NYI")
@@ -873,7 +873,7 @@ pub enum Stage {
 #[derive(Debug, Clone, PartialEq)]
 enum Page {
     Home,
-    Live,
+    Stream,
     Help,
     CreateProject(CreatePage),
     Settings,
