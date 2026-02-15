@@ -1739,8 +1739,9 @@ dependencies = [
 
 [[package]]
 name = "iced_font_awesome"
-version = "0.4.1"
-source = "git+https://github.com/BitFlaker/iced_font_awesome.git#31967437a7ed485777ef3d50cbb0a31b7e2e03fb"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "964e0d089da27a70a30b4e93af6a534327c2c8b530745ff2702b6abf29dc7661"
 dependencies = [
  "iced",
  "serde",

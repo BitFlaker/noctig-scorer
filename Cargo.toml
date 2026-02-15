@@ -14,7 +14,7 @@ edition = "2024"
 [dependencies]
 # UI crates
 iced = { version = "0.14.0", features = ["wayland", "canvas", "advanced", "image", "svg"] }
-iced_font_awesome = "0.4.1"
+iced_font_awesome = "0.4.2"
 bytemuck = "1.25.0"
 
 # Computing
@@ -47,6 +47,3 @@ chrono = "0.4.42"
 itertools = "0.14.0"    # Only required for `intersperse_with`
 webbrowser = "1.0.6"
 md-5 = "0.10.6"
-
-[patch.crates-io]
-iced_font_awesome = { git = "https://github.com/BitFlaker/iced_font_awesome.git" }

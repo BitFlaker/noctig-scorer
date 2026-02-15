@@ -3,7 +3,7 @@ use iced::{Element, Length, Padding};
 use iced::widget::{button, column, container, row, space, svg, text};
 use iced::widget::svg::Handle;
 
-use crate::{CreatePage, ICON, Message, NoctiG, Page};
+use crate::{CreatePage, ICON, Message, NoctiG, Page, WindowType};
 use crate::layout::create_project::{project_data, project_details, project_processing};
 use crate::formatting::{font, theme};
 
@@ -45,12 +45,12 @@ pub fn view<'a>(app: &'a NoctiG, page: &'a CreatePage) -> Element<'a, Message> {
                 .width(Length::Fill),
 
             space().height(Length::Fill),
-            
+
             container(
                 row![
                     button(text("Help").size(12.0))
                         .style(theme::button_text_secondary)
-                        .on_press(Message::SwitchPage(Page::Licenses))
+                        .on_press(Message::OpenWindow(WindowType::Licenses))
                         .padding([4.0, 8.0]),
 
                     container(text("•")
@@ -60,7 +60,7 @@ pub fn view<'a>(app: &'a NoctiG, page: &'a CreatePage) -> Element<'a, Message> {
 
                     button(text("Edit Presets").size(12.0))
                         .style(theme::button_text_secondary)
-                        .on_press(Message::SwitchPage(Page::Licenses))
+                        .on_press(Message::OpenWindow(WindowType::Licenses))
                         .padding([4.0, 8.0])
                 ]
             ).padding([6.0, 8.0]),
@@ -72,7 +72,7 @@ pub fn view<'a>(app: &'a NoctiG, page: &'a CreatePage) -> Element<'a, Message> {
                 space().height(12.0),
                 text(get_title(page)).size(32.0),
                 space().height(4.0),
-                
+
                 text("Create a new project and import signals from EDF files. Then adjust signal processing and other miscellaneous options for the project.").style(theme::text_secondary).size(14.0),
 
                 match page {

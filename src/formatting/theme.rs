@@ -189,6 +189,14 @@ pub fn container_tag(theme: &Theme) -> widget::container::Style {
     style
 }
 
+pub fn container_tooltip(theme: &Theme) -> widget::container::Style {
+    let stroke = theme.extended_palette().background.strong.color;
+    let mut style = container_stage_base(stroke);
+    style.border.radius = 10.0.into();
+
+    style
+}
+
 pub fn container_key(theme: &Theme) -> widget::container::Style {
     let color_background = theme.extended_palette().background.stronger.color;
     let color_border = theme.extended_palette().background.strong.color;
@@ -216,6 +224,20 @@ pub fn container_recent_projects(theme: &Theme) -> widget::container::Style {
         },
         ..widget::container::Style::default()
     }
+}
+
+pub fn container_expanded_license(theme: &Theme) -> widget::container::Style {
+    let mut base = container_recent_projects(theme);
+    let color = theme.extended_palette().background.neutral.color;
+    base.border.color = color.scale_alpha(0.4);
+    base.border.radius = Radius {
+        top_left: 0.0,
+        top_right: 0.0,
+        bottom_right: 10.0,
+        bottom_left: 10.0
+    };
+
+    base
 }
 
 pub fn container_secondary(theme: &Theme) -> widget::container::Style {
@@ -327,6 +349,44 @@ pub fn button_text(theme: &Theme, status: iced::widget::button::Status) -> widge
     style
 }
 
+pub fn button_text_collapsible_collapsed(theme: &Theme, status: iced::widget::button::Status) -> widget::button::Style {
+    use iced::widget::button::text;
+    use iced::widget::button::Status;
+
+    let palette = theme.extended_palette();
+    let color = palette.background.neutral.color;
+    let text_color = palette.background.neutral.text;
+    let mut style = text(theme, status);
+    style.border.radius = 10.0.into();
+    style.text_color = text_color.into();
+
+    match status {
+        Status::Pressed => {
+            style.background = Some(color.scale_alpha(0.8).into());
+        },
+        Status::Hovered => {
+            style.background = Some(color.scale_alpha(0.6).into());
+        },
+        _ => {
+            style.background = Some(color.scale_alpha(0.4).into());
+        },
+    }
+
+    style
+}
+
+pub fn button_text_collapsible_expanded(theme: &Theme, status: iced::widget::button::Status) -> widget::button::Style {
+    let mut base = button_text_collapsible_collapsed(theme, status);
+    base.border.radius = Radius {
+        top_left: 10.0,
+        top_right: 10.0,
+        bottom_right: 0.0,
+        bottom_left: 0.0
+    };
+
+    base
+}
+
 pub fn button_text_secondary(theme: &Theme, status: iced::widget::button::Status) -> widget::button::Style {
     use iced::widget::button::Status;
 
@@ -407,14 +467,32 @@ pub fn stroke(theme: &Theme) -> widget::container::Style {
     let mut border_color = theme.extended_palette().background.strongest.color;
     border_color.a = 0.32;
 
+    stroke_color(border_color)
+}
+
+pub fn stroke_primary(theme: &Theme) -> widget::container::Style {
+    let mut border_color = theme.extended_palette().background.strongest.color;
+    border_color.a = 0.72;
+
+    stroke_color(border_color)
+}
+
+fn stroke_color(color: Color) -> widget::container::Style {
     widget::container::Style {
-        background: Some(border_color.into()),
+        background: Some(color.into()),
         border: border::Border {
             width: 0.0,
             radius: 0.0.into(),
-            color: border_color,
+            color: color,
         },
         ..widget::container::Style::default()
+    }
+}
+
+pub fn text_url(theme: &Theme) -> widget::text::Style {
+    let color = theme.extended_palette().primary.base.color;
+    widget::text::Style {
+        color: Some(color),
     }
 }
 

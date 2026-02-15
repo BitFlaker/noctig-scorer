@@ -3,11 +3,12 @@
 use edf_rs::file::EDFFile;
 use iced::futures::channel::mpsc::Sender;
 use iced::futures::{SinkExt, Stream};
-use iced::{Element, Point, Size, Task, Theme, window};
+use iced::window::{Id, Position, Settings};
+use iced::{Element, Point, Size, Subscription, Task, Theme, Vector, window};
 use iced::keyboard::{key::Named, Key};
 use iced::event::Status;
 use iced::event;
-use iced::widget;
+use iced::widget::{self, space};
 use ndarray::Array1;
 use rfd::AsyncFileDialog;
 use serde::{Deserialize, Serialize};
@@ -27,10 +28,12 @@ use crate::database::{get_last_browse_source_path, get_last_project_create_path,
 use crate::external::lspopt::spectrogram_lspopt;
 use crate::external::scipy::Spectrogram;
 use crate::layout::create_project::create_viewer;
-use crate::layout::{scorer, start};
+use crate::layout::license::load_licenses;
+use crate::layout::{license, scorer, start};
 use crate::storage::epoch_reader::EpochReader;
 use crate::formatting::theme::{CLEAR_DARK_TEXT_SECONDARY, border_background_base, text_foreground_base};
 use crate::storage::project_initializer;
+use crate::views::collapsible::Collapsible;
 use crate::views::spectrogram::widget::SpectrogramView;
 
 mod layout;
@@ -55,13 +58,11 @@ fn main() -> iced::Result {
         .init();
 
     // Launch UI
-    iced::application(NoctiG::boot, NoctiG::update, NoctiG::view)
-        .window_size(Size::new(1400.0, 800.0))
+    iced::daemon(NoctiG::boot, NoctiG::update, NoctiG::view)
         .title("NoctiG Scorer")
         .theme(NoctiG::theme)
         .subscription(NoctiG::subscription)
         .settings(settings())
-        .centered()
         .run()
 }
 
@@ -168,6 +169,30 @@ impl SignalSource {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum WindowType {
+    MainWindow,
+    Licenses,
+    About
+}
+
+impl WindowType {
+    pub fn settings(&self) -> window::Settings {
+        match self {
+            WindowType::MainWindow => Settings {
+                position: Position::Centered,
+                size: Size::new(1400.0, 800.0),
+                ..Default::default()
+            },
+            WindowType::Licenses => Settings {
+                size: Size::new(900.0, 600.0),
+                ..Default::default()
+            },
+            WindowType::About => Default::default()
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SignalMergeGroup {
     pub signal_id: u16,
@@ -212,6 +237,20 @@ pub struct CurrentProject {
     loading_progress_spectrogram: Option<f32>
 }
 
+pub struct LicenseData {
+    pub url: String,
+    pub license_texts: Vec<&'static str>,
+}
+
+impl LicenseData {
+    pub fn new(url: &str, license_texts: &[&'static str]) -> Self {
+        Self {
+            url: url.to_string(),
+            license_texts: license_texts.to_vec()
+        }
+    }
+}
+
 struct NoctiG {
     current_page: Page,
     window_time_formatter_index: usize,
@@ -223,6 +262,8 @@ struct NoctiG {
     current_project: Option<CurrentProject>,
     recent_projects: Vec<RecentProject>,
     filtered_recent_projects: Option<Vec<RecentProject>>,
+    windows: BTreeMap<Id, WindowType>,
+    licenses: LazyLock<[Vec<Collapsible<LicenseData>>; 3]>
 }
 
 impl CurrentProject {
@@ -317,6 +358,8 @@ impl CurrentProject {
 
 impl NoctiG {
     fn boot() -> (NoctiG, Task<Message>) {
+        let (_new_id, task) = window::open(WindowType::MainWindow.settings());
+
         (NoctiG {
             current_page: Page::Home,
             window_time_formatter_index: 1,
@@ -327,8 +370,13 @@ impl NoctiG {
             current_project: None,
             recent_projects: Vec::new(),
             search_task_id: String::new(),
-            filtered_recent_projects: None
-        }, Task::done(Message::LoadStartPage))
+            filtered_recent_projects: None,
+            windows: BTreeMap::new(),
+            licenses: LazyLock::new(|| load_licenses())
+        }, Task::batch([
+            Task::done(Message::LoadStartPage),
+            task.map(move |id| Message::WindowOpened(id, WindowType::MainWindow)),
+        ]))
     }
 
     fn calculate_spectrogram(path: String, source_path: String, signal_index: usize) -> impl Stream<Item = Message> {
@@ -374,6 +422,38 @@ impl NoctiG {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::WindowClosed(id) => {
+                self.windows.remove(&id);
+                return if self.windows.is_empty() {
+                    iced::exit()
+                } else {
+                    Task::none()
+                }
+            }
+            Message::OpenWindow(window_type) => {
+                let Some(last_window) = self.windows.keys().last() else {
+                    return Task::none();
+                };
+
+                let window_type2 = window_type.clone();
+                return window::position(*last_window)
+                    .then(move |last_position| {
+                        let mut settings = window_type.settings();
+                        settings.position = last_position.map_or(Position::Default, |last_position| {
+                            Position::Specific(last_position + Vector::new(20.0, 20.0))
+                        });
+                        let (_, open) = window::open(settings);
+
+                        open
+                    })
+                    .map(move |id| Message::WindowOpened(id, window_type2.clone()))
+            }
+            Message::WindowOpened(id, window_type) => {
+                self.windows.insert(id, window_type);
+            }
+            Message::ToggleExpandLicense(category_idx, idx, is_expanded) => {
+                self.licenses[category_idx][idx].set_expanded(is_expanded);
+            }
             Message::LoadStartPage => {
                 if let Ok(recent) = get_recently_opened(25) {
                     self.recent_projects = recent;
@@ -573,12 +653,12 @@ impl NoctiG {
 
                 // Perform the filtering asynchronously
                 return Task::future(async move {
-                    Message::ProjectSearchFiltered((search_task_id, recent.into_iter().filter(|p| {
+                    Message::ProjectSearchFiltered(search_task_id, recent.into_iter().filter(|p| {
                         p.name.to_lowercase().contains(&search) || p.path.to_lowercase().contains(&search)
-                    }).collect()))
+                    }).collect())
                 });
             }
-            Message::ProjectSearchFiltered((search_task_id, filtered)) => {
+            Message::ProjectSearchFiltered(search_task_id, filtered) => {
                 if self.search_task_id != search_task_id {
                     return Task::none()
                 }
@@ -724,6 +804,11 @@ impl NoctiG {
                     warn!("Error opening source code in default browser: {}", error);
                 }
             },
+            Message::OpenURL(url) => {
+                if let Err(error) = webbrowser::open(&url) {
+                    warn!("Error opening url {} in default browser: {}", url, error);
+                }
+            },
             Message::ShowPrivacyPolicy => {
                 panic!("NYI")
             }
@@ -732,63 +817,79 @@ impl NoctiG {
         Task::none()
     }
 
-    fn view(&self) -> Element<'_, Message> {
-        match self.current_page {
-            Page::Home | Page::Stream | Page::Help | Page::Settings => start::view(self),
-            Page::Scorer => scorer::view(self),
-            Page::CreateProject(ref page) => create_viewer::view(self, page),
-            _ => panic!("NYI")
+    fn view(&self, id: Id) -> Element<'_, Message> {
+        let Some(window_type) = self.windows.get(&id) else {
+            return space().into();
+        };
+
+        match window_type {
+            WindowType::MainWindow => {
+                match self.current_page {
+                    Page::Home | Page::Stream | Page::Help | Page::Settings => start::view(self),
+                    Page::Scorer => scorer::view(self),
+                    Page::CreateProject(ref page) => create_viewer::view(self, page),
+                }
+            }
+            WindowType::Licenses => {
+                license::view(self)
+            }
+            WindowType::About => {
+                space().into()
+            }
         }
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        event::listen_with(|event, status, _| match (event, status) {
-            (
-                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                    key: Key::Named(Named::ArrowRight),
-                    ..
-                }),
-                Status::Ignored,
-            ) => Some(Message::MoveAxis(1)),
-            (
-                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                    key: Key::Named(Named::ArrowLeft),
-                    ..
-                }),
-                Status::Ignored,
-            ) => Some(Message::MoveAxis(-1)),
-            (
-                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                    key: Key::Named(Named::Delete),
-                    ..
-                }),
-                Status::Ignored,
-            ) => Some(Message::Rate(Stage::Unset)),
-            (
-                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                    key: Key::Character(k),
-                    modifiers,
-                    ..
-                }),
-                Status::Ignored,
-            ) => match k.to_string().to_lowercase().as_str() {
-                "w" => Some(Message::Rate(Stage::W)),
-                "r" => Some(Message::Rate(Stage::R)),
-                "1" => Some(Message::Rate(Stage::N1)),
-                "2" => Some(Message::Rate(Stage::N2)),
-                "3" => Some(Message::Rate(Stage::N3)),
-                "t" => Some(Message::CycleTimeFormatter),
-                "l" => Some(Message::ToggleRangeDraw),
-                "h" => Some(Message::ToggleHelp),
-                "j" => Some(Message::SeekTo),
-                "s" if modifiers.control() => Some(Message::SaveProject),
-                _ => None
-            },
-            _ => None,
-        })
+        Subscription::batch([
+            window::close_events().map(Message::WindowClosed),
+            event::listen_with(|event, status, _| match (event, status) {
+                (
+                    iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                        key: Key::Named(Named::ArrowRight),
+                        ..
+                    }),
+                    Status::Ignored,
+                ) => Some(Message::MoveAxis(1)),
+                (
+                    iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                        key: Key::Named(Named::ArrowLeft),
+                        ..
+                    }),
+                    Status::Ignored,
+                ) => Some(Message::MoveAxis(-1)),
+                (
+                    iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                        key: Key::Named(Named::Delete),
+                        ..
+                    }),
+                    Status::Ignored,
+                ) => Some(Message::Rate(Stage::Unset)),
+                (
+                    iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                        key: Key::Character(k),
+                        modifiers,
+                        ..
+                    }),
+                    Status::Ignored,
+                ) => match k.to_string().to_lowercase().as_str() {
+                    "w" => Some(Message::Rate(Stage::W)),
+                    "r" => Some(Message::Rate(Stage::R)),
+                    "1" => Some(Message::Rate(Stage::N1)),
+                    "2" => Some(Message::Rate(Stage::N2)),
+                    "3" => Some(Message::Rate(Stage::N3)),
+                    "t" => Some(Message::CycleTimeFormatter),
+                    "l" => Some(Message::ToggleRangeDraw),
+                    "h" => Some(Message::ToggleHelp),
+                    "j" => Some(Message::SeekTo),
+                    "s" if modifiers.control() => Some(Message::SaveProject),
+                    _ => None
+                },
+                _ => None,
+            })
+        ])
     }
 
-    pub fn theme<'a>(&'a self) -> Option<Theme> {
+    pub fn theme<'a>(&'a self, _id: Id) -> Option<Theme> {
         Some(
             Theme::custom_with_fn(
                 "ClearDark".to_string(),
@@ -877,7 +978,6 @@ enum Page {
     Help,
     CreateProject(CreatePage),
     Settings,
-    Licenses,
     Scorer,
 }
 
@@ -922,20 +1022,25 @@ enum Message {
     SeekTo,
     SaveProject,
     SwitchPage(Page),
+    WindowClosed(Id),
+    ToggleExpandLicense(usize, usize, bool),
 
     OpenScorer,
 
     // Start page
     LoadStartPage,
     ProjectSearchChanged(String),
-    ProjectSearchFiltered((String, Vec<RecentProject>)),
+    ProjectSearchFiltered(String, Vec<RecentProject>),
     CreateProjectWizard,
     CreateProjectWizardError(String),
     OpenProjectPath(String),
     LaunchOpenProject,
     OpenProject(Option<PathBuf>),
     ShowSourceCode,
+    OpenURL(String),
     ShowPrivacyPolicy,
+    OpenWindow(WindowType),
+    WindowOpened(Id, WindowType),
 
     // Project Creation Wizard
     CancelCreateProject,

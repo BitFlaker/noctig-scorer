@@ -4,7 +4,7 @@ use iced::widget::svg::Handle;
 use iced::alignment::Vertical;
 use iced_font_awesome::{fa_icon, fa_icon_brands, fa_icon_solid};
 
-use crate::{ICON, Message, NoctiG, Page};
+use crate::{ICON, Message, NoctiG, Page, WindowType};
 use crate::formatting::{font, theme};
 
 pub mod settings;
@@ -87,7 +87,17 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
 
                     button(text("Licenses").size(12.0))
                         .style(theme::button_text_secondary)
-                        .on_press(Message::SwitchPage(Page::Licenses))
+                        .on_press(Message::OpenWindow(WindowType::Licenses))
+                        .padding([4.0, 8.0]),
+
+                    container(text("•")
+                        .style(theme::text_secondary)
+                        .size(14.0)
+                    ).padding(Padding { left: 0.0, top: 3.0, right: 0.0, bottom: 0.0 }),
+
+                    button(text("About").size(12.0))
+                        .style(theme::button_text_secondary)
+                        .on_press(Message::OpenWindow(WindowType::About))
                         .padding([4.0, 8.0]),
 
                     space().width(Length::Fill),
