@@ -1,4 +1,4 @@
-use iced::{mouse, Color, Point, Rectangle, Renderer, Theme};
+use iced::{Color, Point, Rectangle, Renderer, Theme, mouse};
 use iced::alignment::Vertical;
 use iced::gradient::ColorStop;
 use iced::widget::canvas::{Path, Cache, Frame, Geometry, Text};
@@ -64,19 +64,19 @@ impl<Message> canvas::Program<Message> for Liner {
                     Some(ColorStop {
                         offset: segment_percent * self.count_before as f32,
                         color: Color {
-                            r: 0.21,
-                            g: 0.21,
-                            b: 0.23,
-                            a: 1.0
+                            r: 0.2,
+                            g: 0.2,
+                            b: 0.6,
+                            a: 0.1
                         }
                     }),
                     Some(ColorStop {
                         offset: segment_percent * (self.count_before as f32 + 1.0),
                         color: Color {
-                            r: 0.21,
-                            g: 0.21,
-                            b: 0.23,
-                            a: 1.0
+                            r: 0.2,
+                            g: 0.2,
+                            b: 0.6,
+                            a: 0.1
                         }
                     }),
                     Some(ColorStop {
@@ -101,10 +101,10 @@ impl<Message> canvas::Program<Message> for Liner {
                     y: frame.height()
                 }),
                 canvas::Stroke::default().with_color(Color {
-                    r: 0.31,
-                    g: 0.31,
-                    b: 0.35,
-                    a: 1.0
+                    r: 0.36,
+                    g: 0.36,
+                    b: 0.68,
+                    a: 0.24
                 })
             );
             frame.stroke(&Path::line(
@@ -117,10 +117,10 @@ impl<Message> canvas::Program<Message> for Liner {
                     y: frame.height()
                 }),
                 canvas::Stroke::default().with_color(Color {
-                    r: 0.31,
-                    g: 0.31,
-                    b: 0.35,
-                    a: 1.0
+                    r: 0.36,
+                    g: 0.36,
+                    b: 0.68,
+                    a: 0.24
                 })
             );
 
@@ -200,6 +200,10 @@ impl<Message> canvas::Program<Message> for Liner {
                     builder.line_to(Point::new(sx as f32, sy as f32));
                 }
             }
+
+            // TODO: It would probably be best if the signal would also get the darkened color
+            //       of an annotation if it is on top of one. This would prevent problematic color
+            //       combinations and also serve as a sort of better highlight.
 
             // Build and stroke the path if there are segments
             if !first {

@@ -88,21 +88,60 @@ pub struct Markers {
     pub local: HashMap<u32, HashMap<Marker, Vec<u64>>>
 }
 
-#[derive(Serialize, Deserialize, Default)]
+impl Markers {
+    pub fn get_timestamps(&self) -> Vec<f32> {
+        let mut timestamps: Vec<_> = self.global.values().cloned().flatten().collect();
+        timestamps.extend(self.local.values().map(|l| l.values()).flatten().flatten());
+        timestamps.sort();
+        timestamps.into_iter()
+            .map(|ts| (ts as f64 / 1_000_000_000.0) as f32)
+            .collect()
+    }
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Annotations {
     pub global: HashMap<Marker, Vec<AnnotationValue>>,
     pub local: HashMap<u32, HashMap<Marker, Vec<AnnotationValue>>>
 }
 
-#[derive(Serialize, Deserialize, Default)]
+impl Annotations {
+    pub fn get_timestamp_durations(&self) -> Vec<(f32, f32)> {
+        let mut timestamps: Vec<_> = self.global.values().cloned().flatten().map(|a| (a.timestamp, a.duration.unwrap_or(0))).collect();
+        timestamps.extend(self.local.values().map(|l| l.values()).flatten().flatten().map(|a| (a.timestamp, a.duration.unwrap_or(0))));
+        timestamps.sort();
+        timestamps.into_iter()
+            .map(|(ts, dur)| (
+                (ts as f64 / 1_000_000_000.0) as f32,
+                (dur as f64 / 1_000_000_000.0) as f32)
+            ).collect()
+    }
+}
+
+#[derive(Serialize, Deserialize, Default, PartialEq, Eq, Clone)]
 pub struct AnnotationValue {
     pub timestamp: u64,
-    pub value: String
+    pub value: String,
+    pub duration: Option<u64>
+}
+
+impl PartialOrd for AnnotationValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.timestamp.partial_cmp(&other.timestamp)
+    }
+}
+
+impl Ord for AnnotationValue {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.timestamp.cmp(&other.timestamp)
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct SessionState {
-    pub position: u64
+    pub position: u64,
+    #[serde(default)]
+    pub project_duration: Duration,
 
     // TODO: Save the toggle states and current settings (e.g. timeframe format, show legend, etc.)
 }
@@ -230,8 +269,11 @@ pub struct CurrentProject {
     project_name: String,
     readers: Vec<EpochReader>,
     project: Project,
+    is_global_marker: bool,
+    current_marker: Marker,
     markers: Markers,
     annotations: Annotations,
+    session_state: SessionState,
     scorings: Option<Scorings>,
     spectrogram: Option<SpectrogramView>,
     loading_progress_spectrogram: Option<f32>
@@ -288,8 +330,11 @@ impl CurrentProject {
             project_name,
             readers,
             project,
+            is_global_marker: false,
+            current_marker: Marker::Red,
             markers: Markers::default(),
             annotations: Annotations::default(),
+            session_state: SessionState::default(),
             scorings: None,
             spectrogram: None,
             loading_progress_spectrogram: None
@@ -302,6 +347,7 @@ impl CurrentProject {
 
     pub fn load_labels(&mut self) -> Result<(), Box<dyn Error>>{
         let project_path= Path::new(&self.path);
+        let session_file = project_path.join("session.json");
         let subdir_lables = project_path.join("lables");
         let scores_file = subdir_lables.join("scores.json");
         let markers_file = subdir_lables.join("markers.json");
@@ -339,18 +385,48 @@ impl CurrentProject {
             });
         }
 
+        // Load stored session file or get default
+        self.session_state = if session_file.exists() {
+            let session_state_json = fs::read_to_string(session_file)?;
+            serde_json::from_str::<SessionState>(&session_state_json)?
+        }
+        else {
+            SessionState::default()
+        };
+
         Ok(())
     }
 
     pub fn save(&self) -> Result<(), Box<dyn Error>> {
         let subdir_lables = Path::new(&self.path).join("lables");
         let scores_file = subdir_lables.join("scores.json");
+        let markers_file = subdir_lables.join("markers.json");
+        let annotations_file = subdir_lables.join("annotations.json");
 
         // Write current score collection file if required for project type
         if self.project.project_type == ProjectType::SleepScoring {
             let scores_json = serde_json::to_string_pretty(&self.scorings)?;
             fs::write(scores_file, scores_json)?;
         }
+
+        // Save markers
+        let markers_json = serde_json::to_string_pretty(&self.markers)?;
+        fs::write(markers_file, markers_json)?;
+
+        // Save annotations
+        let annotations_json = serde_json::to_string_pretty(&self.annotations)?;
+        fs::write(annotations_file, annotations_json)?;
+
+        // Save the current session state as well
+        self.save_session()?;
+
+        Ok(())
+    }
+
+    pub fn save_session(&self) -> Result<(), Box<dyn Error>> {
+        let session_file = Path::new(&self.path).join("session.json");
+        let session_json = serde_json::to_string_pretty(&self.session_state)?;
+        fs::write(session_file, session_json)?;
 
         Ok(())
     }
@@ -402,7 +478,7 @@ impl NoctiG {
             let mut i = 0;
             let mut spectro_samples = vec![0.0; sample_count];
             let mut last_progress = 0;
-            while let Ok(Some(record)) = reader.read_record() {
+            while let Ok(Some(record)) = reader.read_record() {     // TODO: This should probagly read by second (in case of discontinuous data)
                 spectro_samples[i * record_samples..(i + 1) * record_samples].copy_from_slice(&record.get_physical_samples(&signal)[signal_index]);
                 i += 1;
                 let progress = (100.0 * i as f32 / record_count as f32).round() as u16;
@@ -499,7 +575,7 @@ impl NoctiG {
                 project.spectrogram = Some(SpectrogramView::new(spectrogram, "lajolla".to_string()));
             },
             Message::SeekTo => {
-                let epoch = 1100;
+                let epoch = 700;
 
                 let Some(project) = &mut self.current_project else {
                     return Task::none();
@@ -620,13 +696,90 @@ impl NoctiG {
                 project.loading_progress_spectrogram = Some(0.0);
                 let source_path = project.project.signals.get(1).unwrap().path.clone();
 
+                // Get readers for retrieving project duration
+                let readers = project.project.signals.iter().map(|source| {
+                    let path = Path::new(&project.path).join(&source.path);
+                    let reader = EDFFile::open(&path);
+                    reader.map(|r| (r, source.offset))
+                }).collect::<Result<Vec<_>, _>>();
+
+                let readers = match readers {
+                    Ok(r) => r,
+                    Err(e) => {
+                        log::error!("Unable to open source readers for getting project duration: {}", e);
+                        Vec::new()
+                    }
+                };
+
                 // Change the page to the scorer and resize the window
                 self.current_page = Page::Scorer;
                 return Task::batch([
                     Task::stream(Self::calculate_spectrogram(project.path.clone(), source_path, 0)),
+                    Task::future(get_project_duration(readers)),
                     resize_window(Size::new(1400.0, 800.0))
                 ]);
             },
+            Message::ProjectDurationCalculated(duration) => {
+                let Some(project) = &mut self.current_project else {
+                    return Task::none();
+                };
+
+                project.session_state.project_duration = duration;
+            }
+            Message::CreateMarker(signal_idx, x) => {
+                let Some((time, _)) = self.get_marker_data(x, 0.0) else {
+                    return Task::none();
+                };
+
+                let Some(project) = &mut self.current_project else {
+                    return Task::none();
+                };
+
+                insert_marker(
+                    &mut project.markers.local,
+                    &mut project.markers.global,
+                    time,
+                    signal_idx,
+                    project.current_marker.clone()
+                );
+            }
+            Message::CreateDragMarker(signal_idx, x, duration) => {
+                let Some((timestamp, duration)) = self.get_marker_data(x, duration) else {
+                    return Task::none();
+                };
+
+                let Some(project) = &mut self.current_project else {
+                    return Task::none();
+                };
+
+                let value = AnnotationValue {
+                    timestamp,
+                    duration: Some(duration),
+                    value: String::new()
+                };
+
+                insert_marker(
+                    &mut project.annotations.local,
+                    &mut project.annotations.global,
+                    value,
+                    signal_idx,
+                    project.current_marker.clone()
+                );
+
+                // TODO: Add setting which immediately requests annotation value (otherwise you'd have to click the marker to edit)
+            }
+            Message::ToggleGlobalMarker => {
+                let Some(project) = &mut self.current_project else {
+                    return Task::none();
+                };
+                project.is_global_marker = !project.is_global_marker;
+            }
+            Message::CycleMarkerColor => {
+                let Some(project) = &mut self.current_project else {
+                    return Task::none();
+                };
+                project.current_marker = project.current_marker.next();
+            }
             Message::CreateProjectWizardError(error) => {
                 // TODO: Open dialog box
                 eprintln!("{error}");
@@ -817,6 +970,37 @@ impl NoctiG {
         Task::none()
     }
 
+    fn get_marker_data(&self, x: f32, duration: f32) -> Option<(u64, u64)> {
+        let Some(project) = &self.current_project else {
+            return None;
+        };
+
+        // TODO: Take reader according to the way the scorer takes it for time formatting
+        let default_reader = project.readers.iter().max_by(|r1, r2| r1.get_epoch_count().cmp(&r2.get_epoch_count())).unwrap();
+        let max_epoch = default_reader.get_epoch_count();
+        let current_seg_n = default_reader.get_window_start_epoch() as i128;
+        let start_segment = current_seg_n - project.project.epochs_before_current as i128;
+        let end_segment = current_seg_n + project.project.epochs_after_current as i128 + 1;
+        let total_segments = project.project.epochs_before_current as u16 + 1 + project.project.epochs_after_current as u16;
+
+        let target_segment = start_segment as f64 + x as f64 * (end_segment as f64 - start_segment as f64);
+
+        // Prevent markers outside of signal range
+        if target_segment < 0.0 || target_segment > max_epoch as f64 {
+            return None;
+        }
+
+        // Get the offset from the recording start
+        let time_offset = target_segment * EpochReader::EPOCH_DURATION as f64;
+        let time_offset_ns = (time_offset * 1_000_000_000.0) as u64;
+
+        // Get the duration
+        let total_duration = total_segments as f64 * EpochReader::EPOCH_DURATION as f64 * 1_000_000_000.0;
+        let duration = (total_duration * duration as f64) as u64;
+
+        Some((time_offset_ns, duration))
+    }
+
     fn view(&self, id: Id) -> Element<'_, Message> {
         let Some(window_type) = self.windows.get(&id) else {
             return space().into();
@@ -881,6 +1065,9 @@ impl NoctiG {
                     "l" => Some(Message::ToggleRangeDraw),
                     "h" => Some(Message::ToggleHelp),
                     "j" => Some(Message::SeekTo),
+                    "g" => Some(Message::ToggleGlobalMarker),
+                    "m" => Some(Message::CycleMarkerColor),
+                    // TODO: Add toggle for displaying markers / annotations
                     "s" if modifiers.control() => Some(Message::SaveProject),
                     _ => None
                 },
@@ -899,6 +1086,55 @@ impl NoctiG {
         )
     }
 }
+
+fn insert_marker<T>(
+    local_map: &mut HashMap<u32, HashMap<Marker, Vec<T>>>,
+    global_map: &mut HashMap<Marker, Vec<T>>,
+    value: T,
+    signal_index: Option<usize>,
+    marker: Marker
+)
+where
+    T: Ord + Clone {
+    // Get the target marker collection (global or specific signal markers)
+    let map = if let Some(idx) = signal_index {
+        let idx = idx as u32;
+        if !local_map.contains_key(&idx) {
+            local_map.insert(idx, HashMap::new());
+        }
+        local_map.get_mut(&idx)
+    } else {
+        Some(global_map)
+    };
+
+    // Insert the marker into the target
+    if let Some(map) = map {
+        map.entry(marker).and_modify(|ts| {
+            match ts.binary_search(&value) {
+                Ok(pos) | Err(pos) => ts.insert(pos, value.clone()),
+            }
+        }).or_insert(vec![
+            value
+        ]);
+    };
+}
+
+async fn get_project_duration(readers: Vec<(EDFFile, u64)>) -> Message {
+    let mut longest_duration = Duration::ZERO;
+    for (i, (mut reader, offset)) in readers.into_iter().enumerate() {
+        let Ok(duration) = reader.read_file_duration() else {
+            log::error!("Unable to get file duration from reader {}", i);
+            continue;
+        };
+        let duration = duration.saturating_add(Duration::from_millis(offset));
+        if longest_duration < duration {
+            longest_duration = duration;
+        }
+    }
+
+    Message::ProjectDurationCalculated(longest_duration)
+}
+
 
 fn resize_window(new_size: Size) -> Task<Message> {
     // TODO: Show some transition page which does not have scaling artifacts
@@ -959,6 +1195,20 @@ pub enum Marker {
     Cyan,
     Blue,
     Purple
+}
+
+impl Marker {
+    pub fn next(&self) -> Marker {
+        match self {
+            Self::Red => Self::Orange,
+            Self::Orange => Self::Yellow,
+            Self::Yellow => Self::Green,
+            Self::Green => Self::Cyan,
+            Self::Cyan => Self::Blue,
+            Self::Blue => Self::Purple,
+            Self::Purple => Self::Red
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -1026,6 +1276,12 @@ enum Message {
     ToggleExpandLicense(usize, usize, bool),
 
     OpenScorer,
+
+    ToggleGlobalMarker,
+    CycleMarkerColor,
+    ProjectDurationCalculated(Duration),
+    CreateMarker(Option<usize>, f32),
+    CreateDragMarker(Option<usize>, f32, f32),
 
     // Start page
     LoadStartPage,

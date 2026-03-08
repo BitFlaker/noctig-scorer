@@ -2,12 +2,16 @@ use iced::widget::svg::Handle;
 use iced::widget::{Canvas, Column, Id, Row, Space, center, column, container, row, scrollable, shader, space, stack, svg, text};
 use iced::{Alignment, Element, Length, Padding};
 use iced::alignment::Vertical;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 use itertools::Itertools;   // Required until `intersperse_with` is stabilized
 
 use crate::formatting::font::REGULAR_BOLD;
 use crate::formatting::theme::SPECTROGRAM_BORDER_WIDTH;
-use crate::{CurrentProject, ICON_SECONDARY, key_legend};
+use crate::storage::epoch_reader::EpochReader;
+use crate::views::signal_markers::{AnnotationMarkData, markers};
+use crate::views::timeline::Timeline;
+use crate::{AnnotationValue, CurrentProject, ICON_SECONDARY, Marker, key_legend};
 use crate::{Message, NoctiG, Stage};
 use crate::formatting::{formatters, theme};
 use crate::views::line_chart::Liner;
@@ -26,22 +30,22 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
     let spectrogram_view = view_spectrogram(&project);
 
     let mut index = 0;
-    let signals = Column::from_vec(
-        project.readers.iter().map(|reader| {
-            let base_index = index;
-            index += reader.signal_count();
+    let signal_widgets = project.readers.iter().map(|reader| {
+        let base_index = index;
+        index += reader.signal_count();
 
-            Column::from_iter(
-                reader.get_chart_signals().into_iter().map(|signal|
-                    Liner::from_chart_signal(signal, base_index, app.draw_ranges, project.project.epochs_before_current, project.project.epochs_after_current)).map(|l|
-                        Canvas::new(l)
-                            .width(Length::Fill)
-                            .height(Length::Fixed(100.0 + 2.0 * SIGNAL_PADDING_VERTICAL))
-                            .into()
-                )
-            ).into()
-        }
-    ).collect::<Vec<_>>()).width(Length::Fill);
+        Column::from_iter(
+            reader.get_chart_signals().into_iter().map(|signal|
+                Liner::from_chart_signal(signal, base_index, app.draw_ranges, project.project.epochs_before_current, project.project.epochs_after_current)).map(|l|
+                    Canvas::new(l)
+                        .width(Length::Fill)
+                        .height(Length::Fixed(100.0 + 2.0 * SIGNAL_PADDING_VERTICAL))
+                        .into()
+            )
+        ).into()
+    }).collect::<Vec<_>>();
+    let signal_count = signal_widgets.len();
+    let signals = Column::from_vec(signal_widgets).width(Length::Fill);
 
     let default_reader = project.readers.iter().max_by(|r1, r2| r1.get_epoch_count().cmp(&r2.get_epoch_count())).unwrap();
 
@@ -75,6 +79,32 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
             ).style(Stage::background(stage)).padding([4.0, 0.0]).width(Length::Fill).align_x(Alignment::Center)
         ).padding([0.0, 16.0]).width(Length::FillPortion((end_segment - start_segment) as u16)).into()
     }));
+
+    let window_size = ((project.project.epochs_before_current + project.project.epochs_after_current + 1) as u32 * EpochReader::EPOCH_DURATION) as f32;
+
+    // Get the entire visible viewport timeframe
+    let time_window_ns = (
+        (time_frame.0 as i128 - project.project.epochs_before_current as i128 * EpochReader::EPOCH_DURATION as i128) * 1_000_000_000,
+        (time_frame.1 as i128 + project.project.epochs_after_current as i128 * EpochReader::EPOCH_DURATION as i128) * 1_000_000_000
+    );
+
+    // Get all timestamps of visible markers
+    let global_markers = get_relative_markers(time_window_ns, &project.markers.global);
+    let visible_local_markers = project.markers.local.iter().flat_map(|(signal_index, markers)| {
+        get_relative_markers(time_window_ns, markers).into_iter()
+            .map(|v| (signal_index.clone(), v))
+            .collect::<Vec<_>>()
+    }).collect();
+
+    // Get all timestamps and durations of visible annotations
+    let global_annotations = get_relative_annotations(time_window_ns, &project.annotations.global);
+    let visible_local_annotations = project.annotations.local.iter().flat_map(|(signal_index, markers)| {
+        get_relative_annotations(time_window_ns, markers)
+            .into_iter()
+            .map(|v| (signal_index.clone(), v))
+            .collect::<Vec<_>>()
+    })
+    .collect();
 
     column![
         row![
@@ -115,7 +145,20 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
         stack!(
             scrollable(
                 column![
-                    signals,
+                    stack![signals].push_under(
+                        markers(signal_count)
+                            .global(project.is_global_marker)
+                            .local_markers(visible_local_markers)
+                            .global_markers(global_markers)
+                            .local_annotations(visible_local_annotations)
+                            .global_annotations(global_annotations)
+                            .current_marker(project.current_marker.clone())
+                            .style(theme::marker)
+                            .on_marked(Message::CreateMarker)
+                            .on_drag_marked(Message::CreateDragMarker)
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                    ),
 
                     // Bottom padding to make place for floating stage indicators
                     space().height(24.0 + 32.0)
@@ -129,8 +172,12 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
             ].width(Length::Fill),
         ).width(Length::Fill),
 
-        // TODO: Add full markers and annotation timeline
+        // Marker / Annotations timeline scroller
+        Canvas::new(Timeline::new(window_size, project.markers.get_timestamps(), project.annotations.get_timestamp_durations()))
+            .width(Length::Fill)
+            .height(Length::Fixed(40.0)),
 
+        // Status bar
         container(
             column![
                 // Status stroke
@@ -195,4 +242,41 @@ fn view_spectrogram<'a>(project: &'a CurrentProject) -> Element<'a, Message> {
 
         loading,
     ).into()
+}
+
+fn get_relative_markers(time_window: (i128, i128), values: &HashMap<Marker, Vec<u64>>) -> Vec<(Marker, f32)> {
+    values.clone().into_iter().flat_map(|(marker, times)| {
+        times.into_iter().filter_map(|t| if t as i128 >= time_window.0 && t as i128 <= time_window.1 {
+            Some((
+                marker.clone(),
+                (
+                    (t as i128 - time_window.0) as f64 /
+                    (time_window.1 - time_window.0) as f64
+                ) as f32
+            ))
+        } else {
+            None
+        }).collect::<Vec<_>>()
+    }).collect()
+}
+
+fn get_relative_annotations(time_window: (i128, i128), values: &HashMap<Marker, Vec<AnnotationValue>>) -> Vec<AnnotationMarkData> {
+    values.clone().into_iter().flat_map(|(marker, times)| {
+        times.into_iter().filter_map(|av| if av.timestamp as i128 >= time_window.0 - av.duration.unwrap_or(0) as i128 && av.timestamp as i128 <= time_window.1 {
+            let start = (av.timestamp as i128 - time_window.0) as f64 / (time_window.1 - time_window.0) as f64;
+            let duration = (av.duration.unwrap_or(0) as i128) as f64 / (time_window.1 - time_window.0) as f64;
+            let end = start + duration;
+            let diff = if start < 0.0 { start.abs() } else if end > 1.0 { 1.0 - end } else { 0.0 };
+
+            Some(AnnotationMarkData {
+                marker: marker.clone(),
+                position: start.max(0.0) as f32,
+                duration: (duration - diff) as f32,
+                text: av.value.clone()
+            })
+        } else {
+            None
+        })
+        .collect::<Vec<_>>()
+    }).collect()
 }

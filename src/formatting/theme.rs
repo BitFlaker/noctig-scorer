@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
 use iced::border;
 use iced::border::Radius;
 use iced::theme::palette::Danger;
@@ -13,7 +16,9 @@ use palette::Pair;
 use iced::theme::palette::Background;
 use iced::Color;
 
+use crate::Marker;
 use crate::Stage;
+use crate::views::signal_markers;
 
 pub const SPECTROGRAM_BORDER_WIDTH: f32 = 2.0;
 
@@ -62,6 +67,30 @@ pub const CLEAR_LIGHT_STAGES: StagePalette = StagePalette {
     unset: Color::TRANSPARENT
 };
 
+pub static CLEAR_DARK_MARKERS: LazyLock<HashMap<Marker, Color>> = LazyLock::new(|| {
+    let mut marker_colors = HashMap::new();
+    marker_colors.insert(Marker::Red, Color::from_rgb8(210, 75, 75));
+    marker_colors.insert(Marker::Orange, Color::from_rgb8(210, 140, 75));
+    marker_colors.insert(Marker::Yellow, Color::from_rgb8(245, 245, 61));
+    marker_colors.insert(Marker::Green, Color::from_rgb8(92, 214, 92));
+    marker_colors.insert(Marker::Cyan, Color::from_rgb8(92, 214, 214));
+    marker_colors.insert(Marker::Blue, Color::from_rgb8(77, 148, 255));
+    marker_colors.insert(Marker::Purple, Color::from_rgb8(189, 82, 224));
+    marker_colors
+});
+
+pub static CLEAR_LIGHT_MARKERS: LazyLock<HashMap<Marker, Color>> = LazyLock::new(|| {
+    let mut marker_colors = HashMap::new();
+    marker_colors.insert(Marker::Red, Color::from_rgb8(255, 0, 0));
+    marker_colors.insert(Marker::Orange, Color::from_rgb8(255, 128, 0));
+    marker_colors.insert(Marker::Yellow, Color::from_rgb8(255, 255, 0));
+    marker_colors.insert(Marker::Green, Color::from_rgb8(0, 255, 0));
+    marker_colors.insert(Marker::Cyan, Color::from_rgb8(0, 128, 128));
+    marker_colors.insert(Marker::Blue, Color::from_rgb8(0, 0, 255));
+    marker_colors.insert(Marker::Purple, Color::from_rgb8(128, 0, 128));
+    marker_colors
+});
+
 pub fn generate_extended(palette: Palette) -> palette::Extended {
     palette::Extended {
         background: Background {
@@ -107,6 +136,13 @@ pub fn get_log_palette(theme: &Theme) -> StagePalette {
     match theme.palette() {
         CLEAR_DARK => CLEAR_DARK_STAGES,
         _ => CLEAR_LIGHT_STAGES
+    }
+}
+
+pub fn get_marker_palette(theme: &Theme) -> HashMap<Marker, Color> {
+    match theme.palette() {
+        CLEAR_DARK => CLEAR_DARK_MARKERS.clone(),
+        _ => CLEAR_LIGHT_MARKERS.clone()
     }
 }
 
@@ -268,6 +304,12 @@ pub fn container_counter(theme: &Theme, is_current: bool) -> widget::container::
             ..Default::default()
         },
         ..widget::container::Style::default()
+    }
+}
+
+pub fn marker(theme: &Theme) -> signal_markers::Style {
+    signal_markers::Style {
+        marker_colors: get_marker_palette(theme)
     }
 }
 
