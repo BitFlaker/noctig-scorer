@@ -556,7 +556,7 @@ impl Catalog for Theme {
     }
 }
 
-pub fn default(_theme: &Theme) -> Style {
+pub fn default(_: &Theme) -> Style {
     let mut marker_colors = HashMap::new();
     marker_colors.insert(Marker::Red, Color::from_rgb8(255, 0, 0));
     marker_colors.insert(Marker::Orange, Color::from_rgb8(255, 128, 0));

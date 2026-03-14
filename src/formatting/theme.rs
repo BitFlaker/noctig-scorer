@@ -19,6 +19,7 @@ use iced::Color;
 use crate::Marker;
 use crate::Stage;
 use crate::views::signal_markers;
+use crate::views::timeline;
 
 pub const SPECTROGRAM_BORDER_WIDTH: f32 = 2.0;
 
@@ -95,7 +96,7 @@ pub fn generate_extended(palette: Palette) -> palette::Extended {
     palette::Extended {
         background: Background {
             base:      Pair::new(CLEAR_DARK.background, palette.text),
-            weakest:   Pair::new(rgba8!( 22,  22,  22), palette.text),
+            weakest:   Pair::new(rgba8!( 11,  11,  11), palette.text),
             weaker:    Pair::new(rgba8!( 44,  44,  44), palette.text),
             weak:      Pair::new(rgba8!( 50,  50,  50), palette.text),
             neutral:   Pair::new(rgba8!( 56,  56,  56), palette.text),
@@ -304,6 +305,17 @@ pub fn container_counter(theme: &Theme, is_current: bool) -> widget::container::
             ..Default::default()
         },
         ..widget::container::Style::default()
+    }
+}
+
+pub fn timeline(theme: &Theme) -> timeline::Style {
+    let palette = theme.extended_palette();
+
+    timeline::Style {
+        background_color: palette.background.weakest.color,
+        thumb_color: palette.background.strongest.color.scale_alpha(0.6),
+        thumb_border_color: palette.background.strong.color,
+        marker_style: marker(theme)
     }
 }
 

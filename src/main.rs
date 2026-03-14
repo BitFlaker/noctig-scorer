@@ -12,6 +12,8 @@ use iced::widget::{self, space};
 use ndarray::Array1;
 use rfd::AsyncFileDialog;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fs;
@@ -35,6 +37,7 @@ use crate::formatting::theme::{CLEAR_DARK_TEXT_SECONDARY, border_background_base
 use crate::storage::project_initializer;
 use crate::views::collapsible::Collapsible;
 use crate::views::spectrogram::widget::SpectrogramView;
+use crate::views::timeline::Highlight;
 
 mod layout;
 mod formatting;
@@ -269,6 +272,7 @@ pub struct CurrentProject {
     project_name: String,
     readers: Vec<EpochReader>,
     project: Project,
+    pending_viewport_update: RefCell<Option<(u64, u64)>>,
     is_global_marker: bool,
     current_marker: Marker,
     markers: Markers,
@@ -330,6 +334,7 @@ impl CurrentProject {
             project_name,
             readers,
             project,
+            pending_viewport_update: RefCell::new(None),
             is_global_marker: false,
             current_marker: Marker::Red,
             markers: Markers::default(),
@@ -395,6 +400,60 @@ impl CurrentProject {
         };
 
         Ok(())
+    }
+
+    pub fn get_highlights(&self) -> Vec<Highlight> {
+        // TODO: 0 duration annotations should be as long as 1 data record
+
+        // Gather all annotations and markers as highlights
+        let mut global_annotations: Vec<_> = self.annotations.global.iter().flat_map(|(marker, data)| data.iter().cloned().map(|a| Highlight {
+            time_ns: a.timestamp,
+            marker: marker.clone(),
+            duration: a.duration
+        })).collect();
+        let mut local_annotations: Vec<_> = self.annotations.local.iter().flat_map(|(signal, values)| values.iter().flat_map(|(marker, data)| data.iter().cloned().map(|a| (signal.clone(), Highlight {
+            time_ns: a.timestamp,
+            marker: marker.clone(),
+            duration: a.duration
+        })))).collect();
+        let mut global_markers: Vec<_> = self.markers.global.iter().flat_map(|(marker, data)| data.iter().cloned().map(|t| Highlight {
+            time_ns: t,
+            marker: marker.clone(),
+            duration: None
+        })).collect();
+        let mut local_markers: Vec<_> = self.markers.local.iter().flat_map(|(signal, values)| values.iter().flat_map(|(marker, data)| data.iter().cloned().map(|t| (signal.clone(), Highlight {
+            time_ns: t,
+            marker: marker.clone(),
+            duration: None
+        })))).collect();
+
+        // Sort highlights by start time and signal index
+        global_annotations.sort_by(|h1, h2| h1.time_ns.cmp(&h2.time_ns));
+        local_annotations.sort_by(|h1, h2| {
+            let time_cmp = h1.1.time_ns.cmp(&h2.1.time_ns);
+            if time_cmp == Ordering::Equal {
+                return h1.0.cmp(&h2.0)
+            }
+            time_cmp
+        });
+        global_markers.sort_by(|h1, h2| h1.time_ns.cmp(&h2.time_ns));
+        local_markers.sort_by(|h1, h2| {
+            let time_cmp = h1.1.time_ns.cmp(&h2.1.time_ns);
+            if time_cmp == Ordering::Equal {
+                return h1.0.cmp(&h2.0)
+            }
+            time_cmp
+        });
+
+        // Concatenate all to a single vec
+        let mut local_markers: Vec<_> = local_markers.into_iter().map(|a| a.1).collect();
+        let mut local_annotations: Vec<_> = local_annotations.into_iter().map(|a| a.1).collect();
+        let mut highlights: Vec<_> = global_annotations;
+        highlights.append(&mut local_annotations);
+        highlights.append(&mut global_markers);
+        highlights.append(&mut local_markers);
+
+        highlights
     }
 
     pub fn save(&self) -> Result<(), Box<dyn Error>> {
@@ -574,18 +633,24 @@ impl NoctiG {
                 };
                 project.spectrogram = Some(SpectrogramView::new(spectrogram, "lajolla".to_string()));
             },
-            Message::SeekTo => {
-                let epoch = 700;
-
+            Message::SeekTo(new_current_epoch) => {
                 let Some(project) = &mut self.current_project else {
                     return Task::none();
                 };
 
+                let segment_count = project.project.epochs_before_current as usize + project.project.epochs_after_current as usize + 1;
                 for reader in &mut project.readers {
-                    let segment_count = project.project.epochs_before_current as usize + project.project.epochs_after_current as usize + 1;
-                    let _ = reader.seek(EpochReader::EPOCH_DURATION as u64 * 1_000 * epoch as u64);
+                    let _ = reader.seek(EpochReader::EPOCH_DURATION as u64 * 1_000 * new_current_epoch);
                     reader.read_epochs(segment_count).unwrap();
                 }
+
+                // Move the timeline to the current position
+                let new_start_epoch = new_current_epoch.saturating_sub(project.project.epochs_before_current as u64);   // TODO: Somehow get neg. offset working
+                let new_start_ns = new_start_epoch * EpochReader::EPOCH_DURATION as u64 * 1_000_000_000;
+                let new_end_ns = new_start_ns + segment_count as u64 * EpochReader::EPOCH_DURATION as u64 * 1_000_000_000;
+                if let Ok(mut update) = project.pending_viewport_update.try_borrow_mut() {
+                    update.replace((new_start_ns, new_end_ns));
+                };
             },
             Message::CycleTimeFormatter => {
                 self.window_time_formatter_index = (self.window_time_formatter_index + 1) % formatting::formatters::TIME_FORMATTERS.len();
@@ -775,10 +840,29 @@ impl NoctiG {
                 project.is_global_marker = !project.is_global_marker;
             }
             Message::CycleMarkerColor => {
+                if let Some(project) = &mut self.current_project {
+                    project.current_marker = project.current_marker.next();
+                };
+            }
+            Message::ViewportChanged(start, end) => {
+                // TODO: Try to load a preview of the current viewport while dragging (this must not interfere with previous read actions)
+            }
+            Message::ViewportPositionSet(start, _end) => {
                 let Some(project) = &mut self.current_project else {
                     return Task::none();
                 };
-                project.current_marker = project.current_marker.next();
+
+                // Get the max epoch (TODO: Is this even necessary as the timeline should only have valid values anyways?)
+                let default_reader = project.readers.iter().max_by(|r1, r2| r1.get_epoch_count().cmp(&r2.get_epoch_count())).unwrap();
+                let max_epoch = default_reader.get_epoch_count().saturating_sub(project.project.epochs_after_current as u64);
+
+                // Find the closest epoch to the target viewport position
+                let exact_epoch_start = start as f64 / (EpochReader::EPOCH_DURATION as f64 * 1_000_000_000.0);
+                let closest_epoch_start = exact_epoch_start.round() as u64;
+                let new_epoch = (closest_epoch_start + project.project.epochs_before_current as u64).min(max_epoch);
+
+                // Seek to the target epoch
+                return Task::done(Message::SeekTo(new_epoch));
             }
             Message::CreateProjectWizardError(error) => {
                 // TODO: Open dialog box
@@ -1064,7 +1148,7 @@ impl NoctiG {
                     "t" => Some(Message::CycleTimeFormatter),
                     "l" => Some(Message::ToggleRangeDraw),
                     "h" => Some(Message::ToggleHelp),
-                    "j" => Some(Message::SeekTo),
+                    "j" => Some(Message::SeekTo(700)),  // TODO: Get user input
                     "g" => Some(Message::ToggleGlobalMarker),
                     "m" => Some(Message::CycleMarkerColor),
                     // TODO: Add toggle for displaying markers / annotations
@@ -1168,15 +1252,24 @@ fn move_axis(app: &mut NoctiG, direction: i8) -> bool {
     let max_epoch = max_epoch_reader.get_epoch_count();
     let current_epoch = max_epoch_reader.get_window_start_epoch();
 
-    if current_epoch == max_epoch - 1 && direction == 1 {
+    if (current_epoch == max_epoch - 1 && direction == 1) || (current_epoch == 0 && direction == -1) {
         return false;
     }
 
     // Move and read all visible samples
+    let segment_count = project.project.epochs_before_current as usize + project.project.epochs_after_current as usize + 1;
     for reader in &mut project.readers {
-        let segment_count = project.project.epochs_before_current as usize + project.project.epochs_after_current as usize + 1;
         seek_segmented(reader, segment_count, direction);
     }
+
+    // Move the timeline to the current position
+    let new_current_epoch = (current_epoch as i128 + direction as i128) as u64;
+    let new_start_epoch = new_current_epoch.saturating_sub(project.project.epochs_before_current as u64);   // TODO: Somehow get neg. offset working
+    let new_start_ns = new_start_epoch * EpochReader::EPOCH_DURATION as u64 * 1_000_000_000;
+    let new_end_ns = new_start_ns + segment_count as u64 * EpochReader::EPOCH_DURATION as u64 * 1_000_000_000;
+    if let Ok(mut update) = project.pending_viewport_update.try_borrow_mut() {
+        update.replace((new_start_ns, new_end_ns));
+    };
 
     true
 }
@@ -1269,7 +1362,7 @@ enum Message {
     CycleTimeFormatter,
     ToggleRangeDraw,
     ToggleHelp,
-    SeekTo,
+    SeekTo(u64),
     SaveProject,
     SwitchPage(Page),
     WindowClosed(Id),
@@ -1277,6 +1370,8 @@ enum Message {
 
     OpenScorer,
 
+    ViewportChanged(u64, u64),
+    ViewportPositionSet(u64, u64),
     ToggleGlobalMarker,
     CycleMarkerColor,
     ProjectDurationCalculated(Duration),

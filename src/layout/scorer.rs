@@ -10,9 +10,9 @@ use crate::formatting::font::REGULAR_BOLD;
 use crate::formatting::theme::SPECTROGRAM_BORDER_WIDTH;
 use crate::storage::epoch_reader::EpochReader;
 use crate::views::signal_markers::{AnnotationMarkData, markers};
-use crate::views::timeline::Timeline;
 use crate::{AnnotationValue, CurrentProject, ICON_SECONDARY, Marker, key_legend};
 use crate::{Message, NoctiG, Stage};
+use crate::views::timeline::TimelineScrollbar;
 use crate::formatting::{formatters, theme};
 use crate::views::line_chart::Liner;
 
@@ -80,7 +80,7 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
         ).padding([0.0, 16.0]).width(Length::FillPortion((end_segment - start_segment) as u16)).into()
     }));
 
-    let window_size = ((project.project.epochs_before_current + project.project.epochs_after_current + 1) as u32 * EpochReader::EPOCH_DURATION) as f32;
+    let window_size = (project.project.epochs_before_current + project.project.epochs_after_current + 1) as u64 * EpochReader::EPOCH_DURATION as u64;
 
     // Get the entire visible viewport timeframe
     let time_window_ns = (
@@ -105,6 +105,13 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
             .collect::<Vec<_>>()
     })
     .collect();
+
+    // Consume potential pending timeline position update (TODO: This current approach is not really great, view() should not be required to change anything mutably)
+    let timeline_update = if let Ok(mut update) = project.pending_viewport_update.try_borrow_mut() {
+        update.take()
+    } else {
+        None
+    };
 
     column![
         row![
@@ -173,9 +180,18 @@ pub fn view(app: &NoctiG) -> Element<'_, Message> {
         ).width(Length::Fill),
 
         // Marker / Annotations timeline scroller
-        Canvas::new(Timeline::new(window_size, project.markers.get_timestamps(), project.annotations.get_timestamp_durations()))
-            .width(Length::Fill)
-            .height(Length::Fixed(40.0)),
+        TimelineScrollbar::new(
+            project.session_state.project_duration.as_nanos() as u64,
+            window_size * 1_000_000_000,
+            project.get_highlights(),
+        )
+        .style(theme::timeline)
+        .update_position(timeline_update)
+        .zoom_factor(10.0)  // TODO: Calculate the zoom factor somehow (Prevent too large zoom on very short recordings and too small zoom on large recordings)
+        .top_height(32.0)
+        .bottom_height(16.0)
+        .on_position_set(Message::ViewportPositionSet)
+        .on_viewport_change(Message::ViewportChanged),
 
         // Status bar
         container(
