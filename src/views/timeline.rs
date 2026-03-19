@@ -339,7 +339,6 @@ where
             let duration_zoom = self.zoom_width();
             let duration_vp = state.viewport_end_ns.saturating_sub(state.viewport_start_ns);
             let progress = (new_viewport_start as f64 / (self.total_ns - duration_vp) as f64).clamp(0.0, 1.0);
-            println!("{} // {}", duration_vp, duration_zoom);
             let offset_ns = ((duration_zoom - duration_vp) as f64 * progress) as u64;
 
             state.zoom_start_ns = new_viewport_start.saturating_sub(offset_ns);
