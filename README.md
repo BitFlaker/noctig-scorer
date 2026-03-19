@@ -17,6 +17,13 @@ A cross platform tool for manual sleep scoring written in Rust. It is capable of
 [<img src=".github/screenshots/screenshot_project_creation.png" width=350>](.github/screenshots/screenshot_project_creation.png)&nbsp;
 [<img src=".github/screenshots/screenshot_viewer.png" width=420>](.github/screenshots/screenshot_viewer.png)
 
+## Installation
+There are pre-built binaries available to download for Windows and Linux in the Release section.
+This application can be started without any installation by simply running the downloaded executable.
+Downloads for the latest version can be found [here](https://github.com/BitFlaker/noctig-scorer/releases/latest).
+Note that the application is still in early stages of development.
+If you are experiencing any issues, feel free to open a new issue [here](https://github.com/BitFlaker/noctig-scorer/issues/new).
+
 ## Current features
 The current state of this application allows you to do the following:
 * Create and configure projects
@@ -34,8 +41,8 @@ Here are some features which are currently missing, but ***might*** be implement
 * Real-time signal streaming to the application
 * Assistive auto-scoring
 
-## 🚀 Installation
-As of now, there are no pre-built binaries available. This will change as soon as basic functionalities are implemented in the future.
+## Development
+To build the project from source, clone this repository and build it using the Rust compiler.
 
 ### NixOS
 Simply run `nix-shell` and `cargo run` in the project root.
