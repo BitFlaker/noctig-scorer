@@ -256,6 +256,11 @@ where
             ..Default::default()
         }, Color::from_rgba(1.0, 1.0, 1.0, 0.1));
 
+        // In case the timeline has no duration yet, it is still loading --> TODO: Show loading indicator
+        if self.total_ns == 0 {
+            return;
+        }
+
         // Draw top highlights (only those visible in zoom canvas)
         for h in self.highlights.iter().filter(|h| h.time_ns + h.duration.unwrap_or(0) >= state.zoom_start_ns && h.time_ns <= state.zoom_end_ns) {
             let expand = ns_to_x(h.duration.unwrap_or(0), 0, state.zoom_end_ns - state.zoom_start_ns, top_rect);
@@ -311,6 +316,11 @@ where
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
+        // In case the timeline has no duration yet, it is still loading --> TODO: Show loading indicator
+        if self.total_ns == 0 {
+            return;
+        }
+
         let state = tree.state.downcast_mut::<TimelineScrollbarState>();
         let bounds = layout.bounds();
 
@@ -326,9 +336,10 @@ where
             state.viewport_start_ns = new_viewport_start;
             state.viewport_end_ns = new_viewport_end;
 
-            let duration_zoom = state.zoom_end_ns.saturating_sub(state.zoom_start_ns);
+            let duration_zoom = self.zoom_width();
             let duration_vp = state.viewport_end_ns.saturating_sub(state.viewport_start_ns);
             let progress = (new_viewport_start as f64 / (self.total_ns - duration_vp) as f64).clamp(0.0, 1.0);
+            println!("{} // {}", duration_vp, duration_zoom);
             let offset_ns = ((duration_zoom - duration_vp) as f64 * progress) as u64;
 
             state.zoom_start_ns = new_viewport_start.saturating_sub(offset_ns);
@@ -464,7 +475,7 @@ where
     ) {
         let Some(drag_state) = &state.drag else { return };
 
-        let duration_zoom = state.zoom_end_ns.saturating_sub(state.zoom_start_ns);
+        let duration_zoom = self.zoom_width();
         let duration_vp = state.viewport_end_ns.saturating_sub(state.viewport_start_ns);
         let target = drag_state.target.clone();
 
