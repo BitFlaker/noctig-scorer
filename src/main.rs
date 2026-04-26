@@ -185,7 +185,7 @@ impl Project {
     }
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct SignalSource {
     pub path: String,
     pub read_only: bool,
@@ -235,7 +235,7 @@ impl WindowType {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SignalMergeGroup {
     pub signal_id: u16,
     pub group_id: u16
@@ -690,8 +690,14 @@ impl NoctiG {
                 println!("SAVED");
             },
             Message::OpenProjectPath(path) => {
-                match CurrentProject::load(path) {
-                    Ok(project) => self.current_project = Some(project),
+                match CurrentProject::load(path.clone()) {
+                    Ok(project) => {
+                        _ = update_recently_opened(
+                            project.project.name.clone(),
+                            path
+                        ).unwrap();
+                        self.current_project = Some(project);
+                    },
                     Err(e) => eprintln!("Error opening project: {}", e) // TODO: Show error message box
                 }
                 return Task::done(Message::OpenScorer);
@@ -759,7 +765,7 @@ impl NoctiG {
                 };
                 project.spectrogram = None;
                 project.loading_progress_spectrogram = Some(0.0);
-                let source_path = project.project.signals.get(1).unwrap().path.clone();
+                let source_path = project.project.signals.get(0).unwrap().path.clone();
 
                 // Get readers for retrieving project duration
                 let readers = project.project.signals.iter().map(|source| {
@@ -838,6 +844,7 @@ impl NoctiG {
                     return Task::none();
                 };
                 project.is_global_marker = !project.is_global_marker;
+                // TODO: For some reason toggling the global marker does not seem to work for BDF projects??
             }
             Message::CycleMarkerColor => {
                 if let Some(project) = &mut self.current_project {
@@ -981,6 +988,7 @@ impl NoctiG {
                 return Task::future(async {
                     Message::BrowseImportSignal(AsyncFileDialog::new()
                         .add_filter("EDF/EDF+ File", &["edf"])
+                        .add_filter("BDF/BDF+ File", &["bdf"])
                         .set_directory(path)
                         .pick_files()
                         .await

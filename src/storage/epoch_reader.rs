@@ -1,4 +1,4 @@
-use edf_rs::record::{RelativeRecordData, SpanningRecord};
+use edf_rs::record::{RelativeRecordData, Samples, SpanningRecord};
 use edf_rs::{file::EDFFile, headers::signal_header::SignalHeader};
 use std::{error::Error, iter::repeat_n, path::Path};
 
@@ -171,7 +171,7 @@ impl EpochReader {
                 let padding_samples = repeat_n(0, sample_pad_count).collect::<Vec<_>>();
                 let pad_record = RelativeRecordData {
                     offset: f64::NAN,
-                    raw_signal_samples: padding_samples
+                    raw_signal_samples: Samples::Values16Bit(padding_samples)
                 };
 
                 // Insert padding samples in correct position
